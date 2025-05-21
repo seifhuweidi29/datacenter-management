@@ -1,0 +1,15 @@
+pip install django
+pip install reportlab 
+pip install io 
+pip install django-rest-framework
+pip install djangorestframework-simplejwt 
+pip install corsheaders
+pip install celery redis django-celery-beat
+
+Start Celery worker and Celery Beat in separate terminals:
+celery -A datacenter_app worker --loglevel=info
+celery -A datacenter_app beat --loglevel=info
+
+sudo apt install redis-server
+sudo service redis-server start
+sudo service redis-server status (optionally for checking)

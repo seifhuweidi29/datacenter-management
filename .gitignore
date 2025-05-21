@@ -1,0 +1,48 @@
+# Django
+*.log
+*.pot
+*.pyc
+__pycache__/
+db.sqlite3
+media/
+staticfiles/
+.env
+.venv
+env/
+venv/
+ENV/
+
+# Celery
+celerybeat-schedule
+celerybeat-schedule-shm
+celerybeat-schedule-wal
+celerybeat.pid
+
+# Redis
+dump.rdb
+
+# React
+datacenter-management/node_modules/
+datacenter-management/.pnp
+datacenter-management/.pnp.js
+datacenter-management/coverage/
+datacenter-management/build/
+datacenter-management/.DS_Store
+datacenter-management/.env.local
+datacenter-management/.env.development.local
+datacenter-management/.env.test.local
+datacenter-management/.env.production.local
+datacenter-management/npm-debug.log*
+datacenter-management/yarn-debug.log*
+datacenter-management/yarn-error.log*
+
+# Editor specific
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS specific
+.DS_Store
+Thumbs.db 
