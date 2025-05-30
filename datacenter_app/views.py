@@ -4,8 +4,9 @@ from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.contrib.auth.models import User
 from django.contrib.auth import authenticate
-from rest_framework.permissions import AllowAny
+from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
+from rest_framework_simplejwt.authentication import JWTAuthentication
 from .models import *
 from .serializers import *
 import openpyxl
@@ -17,64 +18,71 @@ from django.conf import settings
 import binascii
 from openpyxl import load_workbook
 
-# Signup View
-class SignupView(APIView):
+# Custom Token View with better error handling
+class CustomTokenObtainPairView(TokenObtainPairView):
     permission_classes = [AllowAny]
 
-    def post(self, request):
-        username = request.data.get('username')
-        email = request.data.get('email')
-        password = request.data.get('password')
+    def post(self, request, *args, **kwargs):
+        try:
+            response = super().post(request, *args, **kwargs)
+            return response
+        except Exception as e:
+            return Response(
+                {"error": "Invalid credentials"},
+                status=status.HTTP_401_UNAUTHORIZED
+            )
 
-        if User.objects.filter(username=username).exists():
-            return Response({"error": "Username already exists"}, status=status.HTTP_400_BAD_REQUEST)
-
-        user = User.objects.create_user(username=username, email=email, password=password)
-        return Response({"message": "User created successfully!"}, status=status.HTTP_201_CREATED)
-
-# Login View
-class LoginView(APIView):
-    permission_classes = [AllowAny]
-
-    def post(self, request):
-        username = request.data.get('username')
-        password = request.data.get('password')
-
-        user = authenticate(username=username, password=password)
-
-        if user is not None:
-            refresh = RefreshToken.for_user(user)
-            return Response({
-                'refresh': str(refresh),
-                'access': str(refresh.access_token),
-            })
-
-        return Response({"error": "Invalid credentials"}, status=status.HTTP_401_UNAUTHORIZED)
-
-# Logout View (optional - token-based logout)
+# Logout View with token blacklisting
 class LogoutView(APIView):
-    permission_classes = [AllowAny]
+    permission_classes = [IsAuthenticated]
+    authentication_classes = [JWTAuthentication]
 
     def post(self, request):
-        # No token management needed, simply return a success message
-        return Response({"message": "Logged out successfully!"}, status=status.HTTP_200_OK)
+        try:
+            refresh_token = request.data.get('refresh_token')
+            if refresh_token:
+                token = RefreshToken(refresh_token)
+                token.blacklist()
+            return Response({"message": "Successfully logged out"}, status=status.HTTP_200_OK)
+        except Exception as e:
+            return Response({"error": "Invalid token"}, status=status.HTTP_400_BAD_REQUEST)
 
-
+# Protected DataCenter List View
 class DataCenterListView(APIView):
-    def get(self, request):
-        data_centers = DataCenter.objects.all()
-        serializer = DataCenterSerializer(data_centers, many=True)
-        return Response(serializer.data)
+    permission_classes = [IsAuthenticated]
+    authentication_classes = [JWTAuthentication]
 
-# Fetch a specific DataCenter by ID
+    def get(self, request):
+        try:
+            data_centers = DataCenter.objects.all()
+            serializer = DataCenterSerializer(data_centers, many=True)
+            return Response(serializer.data)
+        except Exception as e:
+            return Response(
+                {"error": "Failed to fetch datacenters"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+# Protected DataCenter Detail View
 class DataCenterDetailView(APIView):
+    permission_classes = [IsAuthenticated]
+    authentication_classes = [JWTAuthentication]
+
     def get(self, request, pk):
         try:
             data_center = DataCenter.objects.get(pk=pk)
             serializer = DataCenterSerializer(data_center)
             return Response(serializer.data)
         except DataCenter.DoesNotExist:
-            return Response({"error": "DataCenter not found"}, status=status.HTTP_404_NOT_FOUND)
+            return Response(
+                {"error": "DataCenter not found"},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        except Exception as e:
+            return Response(
+                {"error": "Failed to fetch datacenter details"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
         
 class EquipmentFetchView(APIView):
     def get(self, request, datacenter_id):

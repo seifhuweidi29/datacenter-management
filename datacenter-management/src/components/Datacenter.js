@@ -22,6 +22,8 @@ import {
   IconButton,
   Alert,
   Snackbar,
+  MenuItem,
+  CircularProgress,
 } from '@mui/material';
 import {
   Add as AddIcon,
@@ -30,16 +32,19 @@ import {
   Edit as EditIcon,
   Delete as DeleteIcon,
   Download as DownloadIcon,
+  Search as SearchIcon,
+  ArrowBack as ArrowBackIcon,
 } from '@mui/icons-material';
-import { useParams } from 'react-router-dom';
-import api from '../api';
+import { useParams, useNavigate } from 'react-router-dom';
+import { datacenters, equipment } from '../api';
 import axios from 'axios';
 import { saveAs } from 'file-saver';
 
 const API_URL = 'http://localhost:8000/api';
 
 const Datacenter = () => {
-  const { datacenterId } = useParams();
+  const { id } = useParams();
+  const navigate = useNavigate();
   const [datacenter, setDatacenter] = useState(null);
   const [equipments, setEquipments] = useState([]);
   const [licenseTypes, setLicenseTypes] = useState([]);
@@ -50,11 +55,39 @@ const Datacenter = () => {
   // Error state
   const [error, setError] = useState(null);
   const [showError, setShowError] = useState(false);
+  const [searchType, setSearchType] = useState('service_tag'); // 'service_tag' or 'license_type'
+  const [searchValue, setSearchValue] = useState('');
+  const [filteredEquipments, setFilteredEquipments] = useState([]);
+  const [showExpiringSoon, setShowExpiringSoon] = useState(false);
 
   // Dialog state
   const [openDialog, setOpenDialog] = useState(false);
   const [isEditMode, setIsEditMode] = useState(false);
   const [currentEquipment, setCurrentEquipment] = useState(null);
+  // Common datacenter equipment types
+  const equipmentTypes = [
+    'Server',
+    'Firewall',
+    'Storage Array',
+    'Switch',
+    'Router',
+    'Load Balancer',
+    'NAS',
+    'SAN',
+    'Backup Appliance',
+    'UPS',
+    'PDU',
+    'KVM Switch',
+    'Network Attached Storage',
+    'Tape Library',
+    'Network Appliance',
+    'Security Appliance',
+    'Wireless Controller',
+    'VoIP Gateway',
+    'Media Gateway',
+    'Optical Transport'
+  ];
+
   const [equipmentForm, setEquipmentForm] = useState({
     equipment_type: '',
     service_tag: '',
@@ -69,7 +102,7 @@ const Datacenter = () => {
   const [importMessage, setImportMessage] = useState("");
   const [deleteLoading, setDeleteLoading] = useState(false);
   const [deleteMessage, setDeleteMessage] = useState("");
-  const [isLoading, setIsLoading] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
 
   // For PDF email
   const [emailDialogOpen, setEmailDialogOpen] = useState(false);
@@ -77,106 +110,153 @@ const Datacenter = () => {
   const [emailSending, setEmailSending] = useState(false);
   const [emailSendMessage, setEmailSendMessage] = useState("");
 
-  // Get token from localStorage
-  const token = localStorage.getItem('access_token');
+  const [retryCount, setRetryCount] = useState(0);
+  const MAX_RETRIES = 3;
+  const REQUEST_TIMEOUT = 10000; // 10 seconds
+
+  const makeRequest = async (requestFn) => {
+    try {
+      const token = localStorage.getItem('access_token');
+      if (!token) {
+        window.location.href = '/login';
+        return;
+      }
+
+      const response = await requestFn();
+      setRetryCount(0); // Reset retry count on success
+      return response;
+    } catch (error) {
+      if (error.code === 'ECONNABORTED' && retryCount < MAX_RETRIES) {
+        setRetryCount(prev => prev + 1);
+        // Wait for 1 second before retrying
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        return makeRequest(requestFn);
+      }
+      throw error;
+    }
+  };
+
+  const fetchEquipments = async () => {
+    if (!id) return;
+    setIsLoading(true);
+    try {
+      const eqs = await equipment.list(id);
+      setEquipments(eqs);
+      setFilteredEquipments(eqs);
+      setError(null);
+    } catch (error) {
+      setError('Failed to fetch equipments. Please try again.');
+      setShowError(true);
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   useEffect(() => {
-    if (!datacenterId) {
-      console.error('Datacenter ID is undefined or missing');
-      return;
-    }
-
-    setIsLoading(true);
-
-    const fetchDataCenter = async () => {
+    const fetchData = async () => {
+      setIsLoading(true);
+      setError(null);
       try {
-        const response = await axios.get(`${API_URL}/datacenters/${datacenterId}/`, {
-          headers: {
-            'Authorization': `Bearer ${token}`
+        const dc = await datacenters.get(id);
+        setDatacenter(dc);
+        await fetchEquipments();
+        fetchLicenseTypes();
+        fetchServiceTags();
+      } catch (err) {
+        let msg = 'Datacenter not found or failed to load.';
+        if (err.response) {
+          msg += ` (Status: ${err.response.status})`;
+          if (err.response.data && err.response.data.error) {
+            msg += `\n${err.response.data.error}`;
           }
-        });
-        setDatacenter(response.data);
-        setError(null);
-      } catch (error) {
-        console.error("Error fetching datacenter:", error);
-        setError("Failed to load datacenter data");
-        setShowError(true);
+        } else if (err.message) {
+          msg += `\n${err.message}`;
+        }
+        setError(msg);
       } finally {
         setIsLoading(false);
       }
     };
-
-    fetchDataCenter();
-    fetchEquipments();
-    fetchLicenseTypes();
-    fetchServiceTags();
-
-    // Poll less frequently to reduce server load
-    let interval = null;
-    if (!serviceTagFilter && !licenseTypeFilter) {
-      interval = setInterval(() => {
-        fetchEquipments();
-      }, 10000); // Poll every 10 seconds
-    }
-
-    return () => {
-      if (interval) clearInterval(interval);
-    };
-  }, [datacenterId, serviceTagFilter, licenseTypeFilter, token]);
-
-  const fetchEquipments = async () => {
-    if (!datacenterId) return; // Early return if no datacenterId
-
-    try {
-      const response = await axios.get(`${API_URL}/datacenters/${datacenterId}/equipments/`, {
-        params: {
-          service_tag: serviceTagFilter,
-          license_type: licenseTypeFilter,
-        },
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
-      });
-
-      setEquipments(response.data);
-      setError(null);
-    } catch (error) {
-      console.error("Error fetching equipments:", error);
-      setError("Failed to fetch equipments");
-      setShowError(true);
-    }
-  };
+    fetchData();
+  }, [id]);
 
   const fetchLicenseTypes = async () => {
-    if (!datacenterId) return;
+    if (!id) return;
 
     try {
-      const response = await axios.get(`${API_URL}/datacenters/${datacenterId}/equipments/license-types/`, {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
-      });
+      const response = await makeRequest(() =>
+        axios.get(`${API_URL}/datacenters/${id}/equipments/license-types/`, {
+          headers: {
+            'Authorization': `Bearer ${localStorage.getItem('access_token')}`
+          },
+          timeout: REQUEST_TIMEOUT
+        })
+      );
 
       setLicenseTypes(response.data);
     } catch (error) {
+      if (error.response?.status === 401) {
+        window.location.href = '/login';
+        return;
+      }
       console.error('Error fetching license types:', error);
     }
   };
 
   const fetchServiceTags = async () => {
-    if (!datacenterId) return;
+    if (!id) return;
 
     try {
-      const response = await axios.get(`${API_URL}/datacenters/${datacenterId}/equipments/service-tags/`, {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
-      });
+      const response = await makeRequest(() =>
+        axios.get(`${API_URL}/datacenters/${id}/equipments/service-tags/`, {
+          headers: {
+            'Authorization': `Bearer ${localStorage.getItem('access_token')}`
+          },
+          timeout: REQUEST_TIMEOUT
+        })
+      );
 
       setServiceTags(response.data);
     } catch (error) {
+      if (error.response?.status === 401) {
+        window.location.href = '/login';
+        return;
+      }
       console.error('Error fetching service tags:', error);
     }
+  };
+
+  const checkExpiringLicenses = async () => {
+    try {
+      const response = await axios.get(`${API_URL}/datacenters/${id}/equipments/expiring/`, {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('access_token')}`
+        }
+      });
+
+      if (response.data && response.data.length > 0) {
+        setShowExpiringSoon(true);
+      }
+    } catch (error) {
+      console.error("Error checking expiring licenses:", error);
+    }
+  };
+
+  const handleSearch = () => {
+    if (!searchValue.trim()) {
+      setFilteredEquipments(equipments);
+      return;
+    }
+
+    const filtered = equipments.filter(equipment => {
+      if (searchType === 'service_tag') {
+        return equipment.service_tag.toLowerCase().includes(searchValue.toLowerCase());
+      } else {
+        return equipment.license_type.toLowerCase().includes(searchValue.toLowerCase());
+      }
+    });
+
+    setFilteredEquipments(filtered);
   };
 
   const handleAddEquipment = () => {
@@ -205,38 +285,52 @@ const Datacenter = () => {
     setOpenDialog(true);
   };
 
-  const handleDelete = async (equipmentId) => {
-    try {
-      if (!window.confirm('Are you sure you want to delete this equipment?')) {
-        return;
-      }
+  const [deleteConfirm, setDeleteConfirm] = useState({
+    open: false,
+    equipmentId: null,
+    equipmentName: ''
+  });
 
-      // Show loading state
+  const handleDeleteClick = (equipmentId, equipmentName) => {
+    setDeleteConfirm({
+      open: true,
+      equipmentId,
+      equipmentName: equipmentName || 'this equipment'
+    });
+  };
+
+  const confirmDelete = async () => {
+    if (!deleteConfirm.equipmentId) return;
+    
+    try {
       setDeleteLoading(true);
       setDeleteMessage('Deleting equipment...');
 
-      await axios.delete(`${API_URL}/datacenters/${datacenterId}/equipments/${equipmentId}/delete/`, {
+      await axios.delete(`${API_URL}/datacenters/${id}/equipments/${deleteConfirm.equipmentId}/delete/`, {
         headers: {
-          'Authorization': `Bearer ${token}`
+          'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
+          'Accept': 'application/json'
         }
       });
 
-      // Clear loading state
-      setDeleteLoading(false);
       setDeleteMessage('Equipment deleted successfully!');
-
-      // Refresh the list after a short delay
-      setTimeout(() => {
-        fetchEquipments();
-      }, 1000);
+      fetchEquipments();
     } catch (error) {
-      console.error('Error deleting equipment:', error);
-      setDeleteLoading(false);
+      console.error('Delete error:', error);
       setDeleteMessage('Failed to delete equipment. Please try again.');
-      setTimeout(() => {
-        setDeleteMessage('');
-      }, 3000);
+    } finally {
+      setDeleteLoading(false);
+      setDeleteConfirm({ ...deleteConfirm, open: false });
+      setTimeout(() => setDeleteMessage(''), 5000);
     }
+  };
+
+  const cancelDelete = () => {
+    setDeleteConfirm({ ...deleteConfirm, open: false });
+  };
+
+  const handleDeleteDialogClose = () => {
+    setDeleteConfirm({ ...deleteConfirm, open: false });
   };
 
   const handleSubmit = async () => {
@@ -248,11 +342,11 @@ const Datacenter = () => {
 
     try {
       if (isEditMode) {
-        await axios.patch(`${API_URL}/datacenters/${datacenterId}/equipments/${currentEquipment.id}/modify/`,
+        await axios.patch(`${API_URL}/datacenters/${id}/equipments/${currentEquipment.id}/modify/`,
           equipmentForm,
           {
             headers: {
-              'Authorization': `Bearer ${token}`,
+              'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
               'Content-Type': 'application/json'
             }
           }
@@ -260,11 +354,11 @@ const Datacenter = () => {
         setOpenDialog(false);
         fetchEquipments();
       } else {
-        await axios.post(`${API_URL}/datacenters/${datacenterId}/equipments/add/`,
+        await axios.post(`${API_URL}/datacenters/${id}/equipments/add/`,
           equipmentForm,
           {
             headers: {
-              'Authorization': `Bearer ${token}`,
+              'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
               'Content-Type': 'application/json'
             }
           }
@@ -279,51 +373,63 @@ const Datacenter = () => {
     }
   };
 
-  const handleExcelImport = (e) => {
+  const handleExcelImport = async (e) => {
     const file = e.target.files[0];
-    if (file) {
+    if (!file) return;
+
+    // Reset file input to allow re-importing the same file
+    e.target.value = null;
+
+    setImportLoading(true);
+    setImportMessage('Importing equipment...');
+
+    try {
       const formData = new FormData();
       formData.append('file', file);
 
-      setImportLoading(true);
-      axios.post(`${API_URL}/datacenters/${datacenterId}/equipments/import-excel/`,
+      const response = await axios.post(
+        `${API_URL}/datacenters/${id}/equipments/import-excel/`,
         formData,
         {
           headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'multipart/form-data'
+            'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
+            'Content-Type': 'multipart/form-data',
+            'Accept': 'application/json'
           }
         }
-      )
-        .then(() => {
-          setImportMessage('Import successful!');
-          fetchEquipments();
-        })
-        .catch(error => {
-          setImportMessage('Import failed: ' + error.response?.data?.detail || 'Unknown error');
-        })
-        .finally(() => {
-          setImportLoading(false);
-        });
+      );
+
+      setImportMessage(response.data.message || 'Import successful!');
+      fetchEquipments();
+    } catch (error) {
+      console.error('Import error:', error);
+      const errorMessage = error.response?.data?.detail || 
+                         error.response?.data?.error || 
+                         'Failed to import Excel file. Please check the format and try again.';
+      setImportMessage(`Import failed: ${errorMessage}`);
+    } finally {
+      setImportLoading(false);
+      // Auto-clear the message after 5 seconds
+      setTimeout(() => setImportMessage(''), 5000);
     }
   };
 
   const handleExportExcel = () => {
-    if (!datacenterId) return;
+    if (!id) return;
 
-    axios.get(`${API_URL}/datacenters/${datacenterId}/equipments/export-excel/`, {
+    axios.get(`${API_URL}/datacenters/${id}/equipments/export-excel/`, {
       params: {
         service_tag: serviceTagFilter,
         license_type: licenseTypeFilter,
       },
       responseType: 'blob',
       headers: {
-        'Authorization': `Bearer ${token}`
+        'Authorization': `Bearer ${localStorage.getItem('access_token')}`
       }
     })
       .then(response => {
         const blob = new Blob([response.data], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
-        saveAs(blob, `equipments_${datacenterId}_${new Date().toISOString().split('T')[0]}.xlsx`);
+        saveAs(blob, `equipments_${id}_${new Date().toISOString().split('T')[0]}.xlsx`);
       })
       .catch(error => {
         console.error("Error exporting Excel:", error);
@@ -332,74 +438,168 @@ const Datacenter = () => {
       });
   };
 
-  const handleExportPDF = () => {
-    if (!datacenterId) return;
+  const handleExportPDF = async () => {
+    try {
+      const response = await axios.get(
+        `${API_URL}/datacenters/${id}/equipments/export-pdf/`,
+        {
+          headers: {
+            'Authorization': `Bearer ${localStorage.getItem('access_token')}`
+          },
+          responseType: 'blob'
+        }
+      );
 
-    axios.get(`${API_URL}/datacenters/${datacenterId}/equipments/export-pdf/`, {
-      params: {
-        service_tag: serviceTagFilter,
-        license_type: licenseTypeFilter,
-      },
-      responseType: 'blob',
-      headers: {
-        'Authorization': `Bearer ${token}`
-      }
-    })
-      .then(response => {
-        const blob = new Blob([response.data], { type: 'application/pdf' });
-        saveAs(blob, `equipments_${datacenterId}_${new Date().toISOString().split('T')[0]}.pdf`);
-      })
-      .catch(error => {
-        console.error("Error exporting PDF:", error);
-        setError("Error exporting PDF");
-        setShowError(true);
-      });
+      const url = window.URL.createObjectURL(new Blob([response.data]));
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', `equipment_report_${id}.pdf`);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+    } catch (error) {
+      console.error("Error exporting PDF:", error);
+      setError("Failed to export PDF");
+      setShowError(true);
+    }
   };
 
-  const handleSendPDF = () => {
+  const handleSendPDF = async () => {
     if (!emailToSend) {
-      setEmailSendMessage('Please enter an email address');
+      setError("Please enter an email address");
+      setShowError(true);
       return;
     }
 
     setEmailSending(true);
-    axios.post(`${API_URL}/datacenters/${datacenterId}/pdf/`,
-      { email: emailToSend },
-      {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
+    try {
+      await axios.post(
+        `${API_URL}/datacenters/${id}/equipments/send-pdf/`,
+        { email: emailToSend },
+        {
+          headers: {
+            'Authorization': `Bearer ${localStorage.getItem('access_token')}`
+          }
         }
-      }
-    )
-      .then(() => {
-        setEmailSendMessage('Email sent successfully!');
-      })
-      .catch(error => {
-        setEmailSendMessage('Failed to send PDF: ' + error.response?.data?.detail || 'Unknown error');
-      })
-      .finally(() => {
-        setEmailSending(false);
-      });
+      );
+      setEmailSendMessage("PDF sent successfully!");
+      setEmailDialogOpen(false);
+    } catch (error) {
+      console.error("Error sending PDF:", error);
+      setError("Failed to send PDF");
+      setShowError(true);
+    } finally {
+      setEmailSending(false);
+    }
   };
+
+  const handleRetry = () => {
+    setRetryCount(0);
+    fetchEquipments();
+    fetchLicenseTypes();
+    fetchServiceTags();
+  };
+
+  if (isLoading) {
+    return (
+      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '60vh' }}>
+        <CircularProgress size={60} thickness={4} />
+      </Box>
+    );
+  }
+
+  if (error) {
+    return (
+      <Box sx={{ mt: 4, display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+        <Alert severity="error" sx={{ mb: 2, width: '100%', maxWidth: 600 }}>{error}</Alert>
+        <Button
+          variant="contained"
+          color="primary"
+          startIcon={<ArrowBackIcon />}
+          onClick={() => navigate('/datacenters')}
+        >
+          Back to Datacenters
+        </Button>
+      </Box>
+    );
+  }
 
   return (
     <Box sx={{ p: 3 }}>
-      {/* Error Snackbar */}
-      <Snackbar
-        open={showError}
-        autoHideDuration={6000}
-        onClose={() => setShowError(false)}
-        anchorOrigin={{ vertical: 'top', horizontal: 'center' }}
-      >
-        <Alert onClose={() => setShowError(false)} severity="error" sx={{ width: '100%' }}>
+      {error && (
+        <Alert
+          severity="error"
+          onClose={() => setShowError(false)}
+          sx={{ mb: 3 }}
+          action={
+            <Button color="inherit" size="small" onClick={handleRetry}>
+              Retry
+            </Button>
+          }
+        >
           {error}
         </Alert>
-      </Snackbar>
+      )}
+
+      {showExpiringSoon && (
+        <Alert
+          severity="warning"
+          onClose={() => setShowExpiringSoon(false)}
+          sx={{ mb: 3 }}
+        >
+          Some licenses are expiring soon. Please check the equipment list.
+        </Alert>
+      )}
+
+      <Box sx={{ mb: 3, display: 'flex', gap: 2, alignItems: 'center' }}>
+        <TextField
+          select
+          label="Search By"
+          value={searchType}
+          onChange={(e) => setSearchType(e.target.value)}
+          sx={{ minWidth: 150 }}
+        >
+          <MenuItem value="service_tag">Service Tag</MenuItem>
+          <MenuItem value="license_type">License Type</MenuItem>
+        </TextField>
+
+        <TextField
+          label="Search Value"
+          value={searchValue}
+          onChange={(e) => setSearchValue(e.target.value)}
+          sx={{ flexGrow: 1 }}
+        />
+
+        <Button
+          variant="contained"
+          onClick={handleSearch}
+          startIcon={<SearchIcon />}
+        >
+          Search
+        </Button>
+
+        <Button
+          variant="contained"
+          color="primary"
+          onClick={handleExportPDF}
+          startIcon={<DownloadIcon />}
+        >
+          Export PDF
+        </Button>
+
+        <Button
+          variant="contained"
+          color="secondary"
+          onClick={() => setEmailDialogOpen(true)}
+          startIcon={<EmailIcon />}
+        >
+          Send PDF
+        </Button>
+      </Box>
 
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
         <Typography variant="h4" sx={{ color: '#007bff' }}>
-          {datacenter?.name || 'No datacenter selected'}
+          {datacenter?.name || 'Datacenter'}
         </Typography>
         <Box sx={{ display: 'flex', gap: 2 }}>
           <Button
@@ -436,17 +636,6 @@ const Datacenter = () => {
             }}
           >
             Export Excel
-          </Button>
-          <Button
-            variant="outlined"
-            startIcon={<EmailIcon />}
-            onClick={() => setEmailDialogOpen(true)}
-            sx={{
-              textTransform: 'none',
-              borderRadius: 2
-            }}
-          >
-            Send PDF
           </Button>
         </Box>
       </Box>
@@ -553,7 +742,7 @@ const Datacenter = () => {
                 </TableRow>
               </TableHead>
               <TableBody>
-                {equipments.length === 0 && !error ? (
+                {filteredEquipments.length === 0 && !error ? (
                   <TableRow>
                     <TableCell colSpan={7} align="center">
                       <Typography variant="body1" sx={{ py: 3, color: '#007bff' }}>
@@ -562,7 +751,7 @@ const Datacenter = () => {
                     </TableCell>
                   </TableRow>
                 ) : (
-                  equipments.map((equipment) => (
+                  filteredEquipments.map((equipment) => (
                     <TableRow
                       key={equipment.id}
                       sx={{
@@ -626,19 +815,14 @@ const Datacenter = () => {
                           >
                             Edit
                           </Button>
-                          <Button
-                            variant="outlined"
+                          <IconButton
                             color="error"
-                            size="small"
-                            onClick={() => handleDelete(equipment.id)}
-                            startIcon={<DeleteIcon />}
-                            sx={{
-                              textTransform: 'none',
-                              borderRadius: 2
-                            }}
+                            onClick={() => handleDeleteClick(equipment.id, `${equipment.equipment_type} - ${equipment.service_tag}`)}
+                            disabled={deleteLoading}
+                            title="Delete equipment"
                           >
-                            Delete
-                          </Button>
+                            <DeleteIcon />
+                          </IconButton>
                         </Box>
                       </TableCell>
                     </TableRow>
@@ -685,12 +869,33 @@ const Datacenter = () => {
         </DialogTitle>
         <DialogContent>
           <Box sx={{ mt: 2 }}>
-            <TextField
-              fullWidth
-              label="Equipment Type"
+            <Autocomplete
+              freeSolo
+              options={equipmentTypes}
               value={equipmentForm.equipment_type}
-              onChange={(e) => setEquipmentForm({ ...equipmentForm, equipment_type: e.target.value })}
-              margin="normal"
+              onChange={(event, newValue) => {
+                setEquipmentForm({ ...equipmentForm, equipment_type: newValue || '' });
+              }}
+              onInputChange={(event, newInputValue) => {
+                setEquipmentForm({ ...equipmentForm, equipment_type: newInputValue });
+              }}
+              renderInput={(params) => (
+                <TextField
+                  {...params}
+                  fullWidth
+                  label="Equipment Type"
+                  margin="normal"
+                  required
+                  InputProps={{
+                    ...params.InputProps,
+                    endAdornment: (
+                      <React.Fragment>
+                        {params.InputProps.endAdornment}
+                      </React.Fragment>
+                    ),
+                  }}
+                />
+              )}
             />
             <TextField
               fullWidth

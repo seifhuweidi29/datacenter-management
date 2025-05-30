@@ -2,21 +2,15 @@ from django.urls import path
 from .views import *
 
 # Add these imports for JWT auth
-from rest_framework_simplejwt.views import (
-    TokenObtainPairView,
-    TokenRefreshView,
-)
+from rest_framework_simplejwt.views import TokenRefreshView
 
 urlpatterns = [
     # JWT AUTH ROUTES
-    path('token/', TokenObtainPairView.as_view(), name='token_obtain_pair'),
+    path('token/', CustomTokenObtainPairView.as_view(), name='token_obtain_pair'),
     path('token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
-
-    # Your API Routes
-    # path('signup/', SignupView.as_view(), name='signup'),  # Disabled for security
-    path('login/', LoginView.as_view(), name='login'),
     path('logout/', LogoutView.as_view(), name='logout'),
 
+    # Protected API Routes
     path('datacenters/', DataCenterListView.as_view(), name='datacenter-list'),
     path('datacenters/<int:pk>/', DataCenterDetailView.as_view(), name='datacenter-detail'),
 
