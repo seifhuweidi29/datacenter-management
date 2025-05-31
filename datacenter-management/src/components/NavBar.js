@@ -66,15 +66,13 @@ const NavBar = ({ children }) => {
   const drawer = (
     <Box sx={{ width: 250 }}>
       <Box sx={{ p: 2, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-        <Typography variant="h6" color="primary">
-          Datacenter Management
-        </Typography>
+        <Box sx={{ height: 40 }} />
       </Box>
       <Divider />
       <List>
         {menuItems.map((item) => (
           <ListItem
-            button
+            button="true"
             key={item.text}
             onClick={() => handleNavigation(item.path)}
             selected={location.pathname === item.path}
@@ -92,7 +90,7 @@ const NavBar = ({ children }) => {
           </ListItem>
         ))}
         <Divider />
-        <ListItem button onClick={handleLogout}>
+        <ListItem button="true" onClick={handleLogout}>
           <ListItemIcon sx={{ color: 'error.main' }}>
             <LogoutIcon />
           </ListItemIcon>
@@ -124,19 +122,7 @@ const NavBar = ({ children }) => {
               <MenuIcon />
             </IconButton>
           )}
-          <Typography
-            variant="h6"
-            component="div"
-            sx={{
-              flexGrow: 1,
-              color: 'primary.main',
-              fontWeight: 600,
-              cursor: 'pointer',
-            }}
-            onClick={() => handleNavigation('/datacenters')}
-          >
-            Datacenter Management
-          </Typography>
+          <Box sx={{ flexGrow: 1 }} />
           {!isMobile && (
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
               {menuItems.map((item) => (
