@@ -87,21 +87,21 @@ class DataCenterDetailView(APIView):
 class EquipmentFetchView(APIView):
     def get(self, request, datacenter_id):
         # Get query parameters for search
-        service_tag = request.GET.get('service_tag', None)
-        license_type = request.GET.get('license_type', None)
+        service_tag = request.GET.get('service_tag', '').strip()
+        license_type = request.GET.get('license_type', '').strip()
 
         try:
             # Get the DataCenter by ID
             datacenter = DataCenter.objects.get(pk=datacenter_id)
 
-            # Filter equipments by the DataCenter and optional search terms
+            # Start with all equipment for this datacenter
             equipments = Equipment.objects.filter(datacenter=datacenter)
 
             # Apply search filters if provided
             if service_tag:
-                equipments = equipments.filter(service_tag__iexact=service_tag)
+                equipments = equipments.filter(service_tag__icontains=service_tag)
             if license_type:
-                equipments = equipments.filter(license_type__iexact=license_type)
+                equipments = equipments.filter(license_type__icontains=license_type)
 
             # Serialize the equipment data
             serializer = EquipmentSerializer(equipments, many=True)
@@ -292,127 +292,310 @@ class EquipmentExportPDFView(APIView):
 
 class EquipmentImportExcelView(APIView):
     def post(self, request, datacenter_id):
+        print("\n=== Excel Import Request Received ===")
+        print(f"Datacenter ID: {datacenter_id}")
+        print(f"Request user: {request.user}" if hasattr(request, 'user') else "No user in request")
+        print(f"Request FILES: {request.FILES}")
+        
+        # Check if user is authenticated
+        if not hasattr(request, 'user') or not request.user.is_authenticated:
+            print("User not authenticated")
+            return Response({"error": "Authentication required"}, status=401)
+            
+        # Check if file is present in the request
+        if 'file' not in request.FILES:
+            error_msg = "No file provided in the request"
+            print(error_msg)
+            return Response({"error": error_msg}, status=400)
+            
+        excel_file = request.FILES['file']
+        print(f"Processing file: {excel_file.name} ({excel_file.size} bytes)")
+        
         try:
-            datacenter = DataCenter.objects.get(pk=datacenter_id)
-            excel_file = request.FILES.get('file')
-            if not excel_file:
-                return Response({"error": "No file uploaded."}, status=400)
-
             # Check file extension
             if not excel_file.name.lower().endswith(('.xlsx', '.xls')):
-                return Response({"error": "Please upload a valid Excel file (.xlsx or .xls)."}, status=400)
+                error_msg = f"Invalid file type: {excel_file.name}. Please upload a valid Excel file (.xlsx or .xls)."
+                print(error_msg)
+                return Response({"error": error_msg}, status=400)
 
             try:
-                print(f"[DEBUG] Loading workbook from file: {excel_file.name}")
+                # Read the Excel file
                 wb = load_workbook(excel_file, data_only=True)
-                print(f"[DEBUG] Workbook loaded successfully. Active sheet: {wb.active.title}")
                 ws = wb.active
 
-                # Get headers from first row
+                # Get headers from first row and create a mapping of lowercase header to column index
                 headers = []
-                for cell in ws[1]:
-                    value = cell.value
-                    print(f"[DEBUG] Header cell {cell.coordinate} value: {value}")
-                    if value is None:
-                        value = ''
-                    headers.append(str(value).strip())
-                
-                expected_headers = [
-                    'equipment_type', 'service_tag', 'license_type', 'serial_number', 'license_expired_date'
-                ]
+                header_map = {}
+                for idx, cell in enumerate(ws[1]):
+                    header = str(cell.value).strip().lower() if cell.value else f"column_{idx+1}"
+                    headers.append(header)
+                    header_map[header] = idx
 
-                # Validate headers
-                print(f"[DEBUG] Expected headers: {expected_headers}")
-                print(f"[DEBUG] Received headers: {headers}")
+                # Map headers to their positions
+                header_positions = {}
+                for idx, header in enumerate(headers):
+                    header_lower = str(header).lower().strip()
+                    header_positions[header_lower] = idx
+
+                # Map of possible column names to their standard names and positions
+                column_mapping = {
+                    'equipment type': ('equipment_type', 'equipment type', 'type', 'equipment'),
+                    'service tag': ('service_tag', 'service tag', 'service', 'tag'),
+                    'license type': ('license_type', 'license type', 'license'),
+                    'serial number': ('serial_number', 'serial number', 'serial', 'sn'),
+                    'license expiry date': ('license_expired_date', 'license expiry', 'expiry date', 'expires', 'expiry')
+                }
+
+                # Find column positions
+                column_positions = {}
+                for display_name, aliases in column_mapping.items():
+                    for alias in aliases:
+                        if alias in header_positions:
+                            column_positions[display_name] = header_positions[alias]
+                            break
+
+                # Check for required columns
+                required_columns = ['equipment type', 'service tag', 'license type', 'serial number']
+                missing_columns = [col for col in required_columns if col not in column_positions]
                 
-                if len(headers) != len(expected_headers):
+                if missing_columns:
                     return Response({
-                        "error": "Invalid file format. The first row must contain exactly 5 headers:",
-                        "expected_headers": expected_headers,
-                        "received_headers": headers
+                        "error": "Missing required columns in the Excel file.",
+                        "missing_columns": missing_columns,
+                        "available_columns": headers
                     }, status=400)
 
-                # Check if headers match in order
-                for i, header in enumerate(headers):
-                    if header.lower() != expected_headers[i].lower():
-                        return Response({
-                            "error": "Invalid file format. Headers do not match expected order:",
-                            "expected_headers": expected_headers,
-                            "received_headers": headers
-                        }, status=400)
+                # Map of display names to model fields
+                field_mapping = {
+                    'equipment type': {'field': 'equipment_type', 'required': True},
+                    'service tag': {'field': 'service_tag', 'required': True},
+                    'license type': {'field': 'license_type', 'required': True},
+                    'serial number': {'field': 'serial_number', 'required': True},
+                    'license expiry date': {'field': 'license_expired_date', 'required': False}
+                }
+
+
+                new_equipments = []
+                updated_count = 0
+                error_messages = []
+                
+                # Get the datacenter object
+                try:
+                    datacenter = DataCenter.objects.get(pk=datacenter_id)
+                    print(f"Found datacenter: {datacenter.name} (ID: {datacenter.id})")
+                except DataCenter.DoesNotExist:
+                    return Response({"error": f"DataCenter with ID {datacenter_id} not found"}, status=404)
+
+                # Process each row starting from row 2
+                print("\n=== Starting to process rows ===")
+                for row_num, row in enumerate(ws.iter_rows(min_row=2), start=2):
+                    try:
+                        print(f"\n--- Processing row {row_num} ---")
+                        row_values = [cell.value for cell in row]
+                        print(f"Row values: {row_values}")
+                        
+                        # Skip empty rows
+                        if all(cell.value is None for cell in row):
+                            print(f"Row {row_num}: Skipping empty row")
+                            continue
+                            
+                        equipment_data = {}
+                        
+                        # Extract data based on column positions
+                        print("Extracting data from columns:")
+                        for display_name, field_info in field_mapping.items():
+                            field_name = field_info['field']
+                            is_required = field_info['required']
+                            
+                            if display_name in column_positions:
+                                col_idx = column_positions[display_name]
+                                if col_idx < len(row):
+                                    value = row[col_idx].value
+                                    print(f"  {display_name} (col {col_idx}): {value} (type: {type(value).__name__ if value else 'None'})")
+                                    
+                                    # Skip None values for non-required fields
+                                    if value is None and not is_required:
+                                        print(f"  - Skipping optional field {field_name}: None")
+                                        continue
+                                        
+                                    if value is not None:
+                                        # Convert to string for text fields
+                                        if field_name != 'license_expired_date':
+                                            equipment_data[field_name] = str(value).strip()
+                                            print(f"  - Set {field_name} = {equipment_data[field_name]}")
+                                        # Handle date field
+                                        elif value:
+                                            if hasattr(value, 'strftime'):  # Already a date object
+                                                equipment_data[field_name] = value.date() if hasattr(value, 'date') else value
+                                                print(f"  - Set date from date object: {equipment_data[field_name]}")
+                                            else:
+                                                try:
+                                                    # Try to parse date string
+                                                    from datetime import datetime
+                                                    value_str = str(value).strip()
+                                                    if value_str:  # Only try to parse if not empty string
+                                                        for fmt in ('%Y-%m-%d', '%d/%m/%Y', '%m/%d/%Y', '%Y/%m/%d', '%d-%m-%Y', '%m-%d-%Y'):
+                                                            try:
+                                                                equipment_data[field_name] = datetime.strptime(value_str, fmt).date()
+                                                                print(f"  - Parsed date '{value_str}' as {equipment_data[field_name]} with format '{fmt}'")
+                                                                break
+                                                            except ValueError:
+                                                                continue
+                                                except Exception as e:
+                                                    print(f"Error parsing date '{value}': {str(e)}")
+                                                    equipment_data[field_name] = None
+                            else:
+                                print(f"  {display_name}: Column not found")
+                        
+                        # Skip empty rows
+                        print(f"Equipment data extracted: {equipment_data}")
+                        if not any(equipment_data.values()):
+                            error_msg = f"Row {row_num}: Empty row skipped"
+                            error_messages.append(error_msg)
+                            print(error_msg)
+                            continue
+                            
+                        print(f"Row {row_num} data after extraction:")
+                        for k, v in equipment_data.items():
+                            print(f"  {k}: {v} (type: {type(v).__name__ if v else 'None'})")
+
+                        # Debug log the row data with column names
+                        print(f"\nProcessing row {row_num}:")
+                        for col_name, value in equipment_data.items():
+                            print(f"  {col_name}: {value} (type: {type(value).__name__})")
+
+                        # Validate required fields with more details
+                        required_fields = {
+                            'equipment_type': 'Equipment Type',
+                            'service_tag': 'Service Tag',
+                            'license_type': 'License Type',
+                            'serial_number': 'Serial Number'
+                        }
+                        
+                        # Make license_expired_date optional and set a default future date if not provided
+                        if 'license_expired_date' not in equipment_data or equipment_data['license_expired_date'] is None:
+                            from datetime import datetime, timedelta
+                            equipment_data['license_expired_date'] = (datetime.now() + timedelta(days=365)).date()  # Default to 1 year from now
+                        
+                        missing_fields = []
+                        for field, display_name in required_fields.items():
+                            value = equipment_data.get(field)
+                            if not value and value != 0:  # 0 is valid for some fields
+                                missing_fields.append(display_name)
+                            elif isinstance(value, str) and not value.strip():
+                                missing_fields.append(f"{display_name} (empty string)")
+                        
+                        if missing_fields:
+                            error_msg = (f"Row {row_num}: Missing or empty required fields: {', '.join(missing_fields)}. "
+                                        f"Available columns: {', '.join(equipment_data.keys())}")
+                            error_messages.append(error_msg)
+                            print(f"ERROR: {error_msg}")
+                            continue
+
+                        # Just validate the serial number is present
+                        try:
+                            serial = str(equipment_data.get('serial_number', '')).strip()
+                            if not serial:
+                                error_msg = f"Row {row_num}: Empty serial number"
+                                error_messages.append(error_msg)
+                                print(error_msg)
+                                continue
+                        except Exception as e:
+                            error_msg = f"Row {row_num}: Invalid serial number - {str(e)}"
+                            error_messages.append(error_msg)
+                            print(error_msg)
+                            continue
+
+                        try:
+                            serial = str(equipment_data['serial_number']).strip()
+                            
+                            # Check if equipment with this serial number already exists
+                            existing_equipment = Equipment.objects.filter(serial_number=serial).first()
+                            
+                            if existing_equipment:
+                                # Update existing equipment
+                                existing_equipment.equipment_type = str(equipment_data['equipment_type']).strip()
+                                existing_equipment.service_tag = str(equipment_data['service_tag']).strip()
+                                existing_equipment.license_type = str(equipment_data['license_type']).strip()
+                                existing_equipment.license_expired_date = equipment_data['license_expired_date']
+                                existing_equipment.datacenter = datacenter
+                                existing_equipment.full_clean()
+                                existing_equipment.save()
+                                print(f"Row {row_num}: Updated existing equipment - {existing_equipment}")
+                                updated_count += 1
+                            else:
+                                # Create new equipment
+                                equipment = Equipment(
+                                    equipment_type=str(equipment_data['equipment_type']).strip(),
+                                    service_tag=str(equipment_data['service_tag']).strip(),
+                                    license_type=str(equipment_data['license_type']).strip(),
+                                    serial_number=serial,
+                                    license_expired_date=equipment_data['license_expired_date'],
+                                    datacenter=datacenter
+                                )
+                                equipment.full_clean()
+                                equipment.save()
+                                new_equipments.append(equipment)
+                                print(f"Row {row_num}: Added new equipment - {equipment}")
+                                
+                            print(f"Assigned to datacenter: {datacenter.name} (ID: {datacenter.id})")
+                        except Exception as e:
+                            error_msg = f"Row {row_num}: Error creating equipment - {str(e)}"
+                            error_messages.append(error_msg)
+                            print(error_msg)
+
+                    except Exception as e:
+                        error_messages.append(f"Row {row_num}: {str(e)}")
+                        continue
+
+                # Bulk create all equipments
+                if new_equipments:
+                    created_equipments = Equipment.objects.bulk_create(new_equipments)
+                    created_count = len(created_equipments)
+                else:
+                    created_count = 0
+
+                # Prepare response
+                response_data = {
+                    "message": f"Successfully processed {len(new_equipments) + updated_count} equipment items ({len(new_equipments)} new, {updated_count} updated).",
+                    "imported_count": len(new_equipments),
+                    "updated_count": updated_count,
+                    "error_count": len(error_messages),
+                }
+                
+                if error_messages:
+                    response_data["errors"] = error_messages
+                    response_data["suggestions"] = [
+                        "Please check that all required fields are present and correctly formatted.",
+                        "Ensure serial numbers are unique.",
+                        "Check that date fields are in a valid format (YYYY-MM-DD, DD/MM/YYYY, or MM/DD/YYYY)."
+                    ]
+
+                return Response(response_data, status=status.HTTP_200_OK)
 
             except Exception as e:
                 import traceback
-                print(f"[DEBUG] Exception in Excel import: {str(e)}")
-                print(f"[DEBUG] Full traceback:")
-                traceback.print_exc()
+                error_trace = traceback.format_exc()
+                print(f"Error processing Excel file: {error_trace}")
                 return Response({
-                    "error": f"Failed to read Excel file: {str(e)}",
-                    "details": "Please ensure the file is a valid Excel (.xlsx) file with the correct headers",
-                    "debug": {
-                        "file_name": excel_file.name,
-                        "file_size": excel_file.size,
-                        "content_type": excel_file.content_type
-                    }
+                    "error": "Error processing Excel file",
+                    "details": str(e),
+                    "suggestion": "Please check the file format and ensure all required columns are present.",
+                    "required_columns": ["Equipment Type", "Service Tag", "License Type", "Serial Number"],
+                    "trace": error_trace if settings.DEBUG else None
                 }, status=400)
-
-            new_equipments = []
-            error_messages = []
-            
-            # Process each row starting from row 2
-            for row in ws.iter_rows(min_row=2):
-                try:
-                    # Get values from each cell
-                    values = [cell.value if cell.value else '' for cell in row]
-                    
-                    # Validate required fields
-                    if not all([values[0], values[1], values[2], values[3], values[4]]):
-                        error_messages.append(f"Row {row[0].row}: Missing required fields")
-                        continue
-
-                    # Validate date format
-                    try:
-                        license_expired_date = values[4].date() if hasattr(values[4], 'date') else values[4]
-                    except (AttributeError, TypeError):
-                        error_messages.append(f"Row {row[0].row}: Invalid date format for license_expired_date")
-                        continue
-
-                    # Check if equipment with this serial number already exists
-                    if Equipment.objects.filter(serial_number=str(values[3])).exists():
-                        error_messages.append(f"Row {row[0].row}: Equipment with serial number '{values[3]}' already exists")
-                        continue
-
-                    # Create equipment instance
-                    equipment = Equipment(
-                        equipment_type=str(values[0]),
-                        service_tag=str(values[1]),
-                        license_type=str(values[2]),
-                        serial_number=str(values[3]),
-                        license_expired_date=license_expired_date,
-                        datacenter=datacenter
-                    )
-                    new_equipments.append(equipment)
-
-                except Exception as e:
-                    error_messages.append(f"Row {row[0].row}: {str(e)}")
-
-            # Bulk create only valid equipments
-            if new_equipments:
-                Equipment.objects.bulk_create(new_equipments)
-
-            response_data = {
-                "message": f"{len(new_equipments)} equipments imported successfully!",
-                "total_rows_processed": len(new_equipments) + len(error_messages),
-                "errors": error_messages
-            }
-
-            # Return success with any errors
-            return Response(response_data, status=201 if new_equipments else 400)
 
         except DataCenter.DoesNotExist:
             return Response({"error": "DataCenter not found"}, status=404)
         except Exception as e:
-            return Response({"error": f"An error occurred: {str(e)}"}, status=500)
+            import traceback
+            error_trace = traceback.format_exc()
+            print(f"Unexpected error: {error_trace}")
+            return Response({
+                "error": "An unexpected error occurred",
+                "details": str(e),
+                "trace": error_trace if settings.DEBUG else None
+            }, status=500)
 
 
 class EquipmentSendPDFByEmailView(APIView):
