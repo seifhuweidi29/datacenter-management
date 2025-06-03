@@ -38,6 +38,7 @@ import {
   Search as SearchIcon,
   ArrowBack as ArrowBackIcon,
   Clear as ClearIcon,
+  PictureAsPdf as PictureAsPdfIcon,
 } from '@mui/icons-material';
 import { useParams, useNavigate } from 'react-router-dom';
 import { datacenters, equipment } from '../api';
@@ -48,29 +49,51 @@ import { useState, useEffect, useRef } from 'react';
 const API_URL = 'http://localhost:8000/api';
 
 const Datacenter = () => {
+  // Constants
+  const MAX_RETRIES = 3;
+  const REQUEST_TIMEOUT = 10000; // 10 seconds
+  
+  // Router and navigation
   const { id } = useParams();
   const navigate = useNavigate();
+  
+  // Data state
   const [datacenter, setDatacenter] = useState(null);
   const [equipments, setEquipments] = useState([]);
   const [licenseTypes, setLicenseTypes] = useState([]);
   const [serviceTags, setServiceTags] = useState([]);
-  const [serviceTagFilter, setServiceTagFilter] = useState('');
-  const [licenseTypeFilter, setLicenseTypeFilter] = useState('');
-
-  // Error and Dialog state
-  const [error, setError] = useState('');
-  const [showError, setShowError] = useState(false);
-  const [importErrors, setImportErrors] = useState([]);
-  const [searchTimeout, setSearchTimeout] = useState(null);
   const [filteredEquipments, setFilteredEquipments] = useState([]);
-  const [showExpiringSoon, setShowExpiringSoon] = useState(false);
+  
+  // Form state
+  const [equipmentForm, setEquipmentForm] = useState({
+    equipment_type: '',
+    service_tag: '',
+    license_type: '',
+    serial_number: '',
+    license_expired_date: ''
+  });
+  
+  // UI state
+  const [isLoading, setIsLoading] = useState(true);
   const [openDialog, setOpenDialog] = useState(false);
   const [isEditMode, setIsEditMode] = useState(false);
   const [currentEquipment, setCurrentEquipment] = useState(null);
+  const [showExpiringSoon, setShowExpiringSoon] = useState(false);
+  
+  // Error and loading states
+  const [error, setError] = useState('');
+  const [showError, setShowError] = useState(false);
+  const [importErrors, setImportErrors] = useState([]);
+  const [importLoading, setImportLoading] = useState(false);
+  const [importMessage, setImportMessage] = useState('');
+  const [deleteLoading, setDeleteLoading] = useState(false);
+  const [deleteMessage, setDeleteMessage] = useState('');
   
   // Search and filter state
-  const [searchType, setSearchType] = useState('service_tag');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchType, setSearchType] = useState('equipment_type');
   const [searchValue, setSearchValue] = useState('');
+  const [searchTimeout, setSearchTimeout] = useState(null);
   const [filters, setFilters] = useState({
     service_tag: '',
     license_type: ''
@@ -80,6 +103,20 @@ const Datacenter = () => {
     license_type: new Set()
   });
   const [showDropdown, setShowDropdown] = useState(false);
+  
+  // Email dialog state
+  const [emailDialogOpen, setEmailDialogOpen] = useState(false);
+  const [emailToSend, setEmailToSend] = useState('');
+  const [emailSending, setEmailSending] = useState(false);
+  const [emailSendMessage, setEmailSendMessage] = useState('');
+  
+  // Snackbar state
+  const [openSnackbar, setOpenSnackbar] = useState(false);
+  const [snackbarMessage, setSnackbarMessage] = useState('');
+  const [snackbarSeverity, setSnackbarSeverity] = useState('info');
+  
+  // Retry state
+  const [retryCount, setRetryCount] = useState(0);
   
   // Common datacenter equipment types
   const equipmentTypes = [
@@ -105,36 +142,8 @@ const Datacenter = () => {
     'Optical Transport'
   ];
 
-  const [equipmentForm, setEquipmentForm] = useState({
-    equipment_type: '',
-    service_tag: '',
-    license_type: '',
-    serial_number: '',
-    license_expired_date: '',
-  });
-
-  // For Excel import
+  // File input ref for Excel import
   const fileInputRef = useRef(null);
-  const [importLoading, setImportLoading] = useState(false);
-  const [importMessage, setImportMessage] = useState("");
-  const [deleteLoading, setDeleteLoading] = useState(false);
-  const [deleteMessage, setDeleteMessage] = useState("");
-  const [isLoading, setIsLoading] = useState(true);
-
-  // For PDF email
-  const [emailDialogOpen, setEmailDialogOpen] = useState(false);
-  const [emailToSend, setEmailToSend] = useState("");
-  const [emailSending, setEmailSending] = useState(false);
-  const [emailSendMessage, setEmailSendMessage] = useState('');
-
-  // Snackbar state
-  const [openSnackbar, setOpenSnackbar] = useState(false);
-  const [snackbarMessage, setSnackbarMessage] = useState('');
-  const [snackbarSeverity, setSnackbarSeverity] = useState('info');
-
-  const [retryCount, setRetryCount] = useState(0);
-  const MAX_RETRIES = 3;
-  const REQUEST_TIMEOUT = 10000; // 10 seconds
 
   const makeRequest = async (requestFn) => {
     try {
@@ -297,7 +306,7 @@ const Datacenter = () => {
     }
   }, [equipments]);
 
-  // Handle search input change
+  // Handle search input change with smart filtering
   const handleSearchChange = (e) => {
     const value = e.target.value;
     setSearchValue(value);
@@ -305,40 +314,54 @@ const Datacenter = () => {
     // Show dropdown when typing
     if (value.trim()) {
       setShowDropdown(true);
+      
+      // Apply smart filtering as user types
+      const searchTerm = value.toLowerCase();
+      const filtered = equipments.filter(equipment => {
+        // Search across multiple fields
+        return (
+          equipment.equipment_type?.toLowerCase().includes(searchTerm) ||
+          equipment.service_tag?.toLowerCase().includes(searchTerm) ||
+          equipment.license_type?.toLowerCase().includes(searchTerm) ||
+          equipment.serial_number?.toLowerCase().includes(searchTerm)
+        );
+      });
+      
+      setFilteredEquipments(filtered);
     } else {
       setShowDropdown(false);
-      // Clear the current filter if search is empty
-      const newFilters = { ...filters };
-      newFilters[searchType] = '';
-      setFilters(newFilters);
-      fetchEquipments({});
+      // Reset to show all equipment when search is empty
+      setFilteredEquipments(equipments);
     }
   };
 
-  // Handle search button click - exact match only
+  // Handle search button click - show all matching results
   const handleSearch = () => {
     setShowDropdown(false);
     
     if (!searchValue.trim()) {
-      // If search is empty, clear all filters
+      // If search is empty, clear all filters and show all
       const emptyFilters = {
         service_tag: '',
         license_type: ''
       };
       setFilters(emptyFilters);
-      fetchEquipments({});
+      setFilteredEquipments(equipments);
       return;
     }
     
-    // Apply exact match for the current search type
-    const newFilters = {
-      service_tag: '',
-      license_type: ''
-    };
-    newFilters[searchType] = searchValue.trim();
+    // Apply smart filtering
+    const searchTerm = searchValue.trim().toLowerCase();
+    const filtered = equipments.filter(equipment => {
+      return (
+        equipment.equipment_type?.toLowerCase().includes(searchTerm) ||
+        equipment.service_tag?.toLowerCase().includes(searchTerm) ||
+        equipment.license_type?.toLowerCase().includes(searchTerm) ||
+        equipment.serial_number?.toLowerCase().includes(searchTerm)
+      );
+    });
     
-    setFilters(newFilters);
-    fetchEquipments(newFilters);
+    setFilteredEquipments(filtered);
   };
   
   // Handle pressing Enter in the search input
@@ -353,18 +376,18 @@ const Datacenter = () => {
     setSearchValue(option);
     setShowDropdown(false);
     
-    // Apply the selected filter - exact match only
-    const newFilters = {
-      service_tag: '',
-      license_type: ''
-    };
-    newFilters[searchType] = option;  // Only set the selected filter
-    setFilters(newFilters);
+    // Apply smart filtering based on selected option
+    const searchTerm = option.toLowerCase();
+    const filtered = equipments.filter(equipment => {
+      return (
+        equipment.equipment_type?.toLowerCase().includes(searchTerm) ||
+        equipment.service_tag?.toLowerCase().includes(searchTerm) ||
+        equipment.license_type?.toLowerCase().includes(searchTerm) ||
+        equipment.serial_number?.toLowerCase().includes(searchTerm)
+      );
+    });
     
-    // Fetch with exact match
-    const exactMatchFilters = {};
-    exactMatchFilters[searchType] = option;
-    fetchEquipments(exactMatchFilters);
+    setFilteredEquipments(filtered);
   };
 
   // Handle search type change
@@ -450,21 +473,32 @@ const Datacenter = () => {
       setDeleteLoading(true);
       setDeleteMessage('Deleting equipment...');
 
-      await axios.delete(`${API_URL}/datacenters/${id}/equipments/${deleteConfirm.equipmentId}/delete/`, {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
-          'Accept': 'application/json'
+      const response = await axios.delete(
+        `${API_URL}/datacenters/${id}/equipments/${deleteConfirm.equipmentId}/`, 
+        {
+          headers: {
+            'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
+            'Accept': 'application/json',
+            'Content-Type': 'application/json'
+          }
         }
-      });
+      );
 
-      setDeleteMessage('Equipment deleted successfully!');
-      fetchEquipments();
+      if (response.data.success) {
+        setSnackbarMessage(response.data.message || 'Equipment deleted successfully');
+        setSnackbarSeverity('success');
+        fetchEquipments(); // Refresh the equipment list
+      } else {
+        throw new Error(response.data.error || 'Failed to delete equipment');
+      }
     } catch (error) {
       console.error('Delete error:', error);
-      setDeleteMessage('Failed to delete equipment. Please try again.');
+      setSnackbarMessage(error.response?.data?.error || 'Failed to delete equipment. Please try again.');
+      setSnackbarSeverity('error');
     } finally {
       setDeleteLoading(false);
       setDeleteConfirm({ ...deleteConfirm, open: false });
+      setOpenSnackbar(true);
       setTimeout(() => setDeleteMessage(''), 5000);
     }
   };
@@ -680,8 +714,8 @@ const Datacenter = () => {
 
     axios.get(`${API_URL}/datacenters/${id}/equipments/export-excel/`, {
       params: {
-        service_tag: serviceTagFilter,
-        license_type: licenseTypeFilter,
+        service_tag: filters.service_tag || '',
+        license_type: filters.license_type || '',
       },
       responseType: 'blob',
       headers: {
@@ -812,6 +846,201 @@ const Datacenter = () => {
 
     return (
       <>
+        <Box sx={{ width: '100%', mb: 4 }}>
+          <Box sx={{ 
+            display: 'grid', 
+            gridTemplateColumns: { xs: '1fr', sm: 'repeat(2, 1fr)', md: 'repeat(3, 1fr)', lg: 'repeat(5, 1fr)' },
+            gap: 3,
+            '& .action-button': {
+              borderRadius: 2,
+              textTransform: 'none',
+              height: '100%',
+              minHeight: '56px',
+              px: 3,
+              '& .MuiButton-startIcon': {
+                mr: 1.5
+              },
+              '&:hover': {
+                transform: 'translateY(-2px)',
+                boxShadow: 3,
+                '&.MuiButton-contained': {
+                  bgcolor: 'primary.dark'
+                },
+                '&.MuiButton-outlined': {
+                  bgcolor: 'action.hover'
+                }
+              },
+              transition: 'all 0.2s ease-in-out'
+            }
+          }}>
+            <Button
+              variant="contained"
+              startIcon={<AddIcon />}
+              onClick={handleAddEquipment}
+              className="action-button"
+              sx={{
+                bgcolor: 'primary.main',
+                '&:hover': {
+                  bgcolor: 'primary.dark'
+                }
+              }}
+            >
+              Add Equipment
+            </Button>
+            <Button
+              variant="outlined"
+              startIcon={<UploadIcon />}
+              onClick={() => fileInputRef.current?.click()}
+              className="action-button"
+            >
+              Import Excel
+            </Button>
+            <Button
+              variant="outlined"
+              startIcon={<DownloadIcon />}
+              onClick={handleExportExcel}
+              className="action-button"
+            >
+              Export Excel
+            </Button>
+            <Button
+              variant="outlined"
+              startIcon={<PictureAsPdfIcon />}
+              onClick={handleExportPDF}
+              className="action-button"
+            >
+              Export PDF
+            </Button>
+            <Button
+              variant="outlined"
+              startIcon={<EmailIcon />}
+              onClick={() => setEmailDialogOpen(true)}
+              className="action-button"
+            >
+              Send PDF
+            </Button>
+          </Box>
+          
+          <Box sx={{ 
+            display: 'flex', 
+            flexDirection: 'column', 
+            gap: 1, 
+            width: '100%',
+            maxWidth: '100%',
+            mt: 2
+          }}>
+            <Box sx={{ display: 'flex', gap: 1, alignItems: 'center', width: '100%' }}>
+              <TextField
+                select
+                variant="outlined"
+                size="small"
+                value={searchType}
+                onChange={handleSearchTypeChange}
+                sx={{ minWidth: 180, '& .MuiOutlinedInput-root': { borderRadius: 2 } }}
+              >
+                <MenuItem value="equipment_type">Equipment Type</MenuItem>
+                <MenuItem value="service_tag">Service Tag</MenuItem>
+                <MenuItem value="license_type">License Type</MenuItem>
+              </TextField>
+              <TextField
+                fullWidth
+                variant="outlined"
+                size="small"
+                placeholder={`Search by ${searchType.replace('_', ' ')}...`}
+                value={searchValue}
+                onChange={handleSearchChange}
+                onKeyPress={handleKeyPress}
+                InputProps={{
+                  startAdornment: (
+                    <InputAdornment position="start">
+                      <SearchIcon color="action" />
+                    </InputAdornment>
+                  ),
+                  endAdornment: searchValue && (
+                    <InputAdornment position="end">
+                      <IconButton
+                        size="small"
+                        onClick={() => {
+                          setSearchValue('');
+                          setShowDropdown(false);
+                        }}
+                      >
+                        <ClearIcon fontSize="small" />
+                      </IconButton>
+                    </InputAdornment>
+                  ),
+                  style: { borderRadius: 16, backgroundColor: '#f5f5f5' }
+                }}
+              />
+              <Button
+                variant="contained"
+                color="primary"
+                onClick={handleSearch}
+                sx={{ borderRadius: 16, textTransform: 'none', px: 3 }}
+              >
+                Search
+              </Button>
+            </Box>
+            
+            {/* Active filters */}
+            <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', mt: 1 }}>
+              {Object.entries(filters).map(([key, value]) => (
+                value && (
+                  <Chip
+                    key={key}
+                    label={`${key.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')}: ${value}`}
+                    onDelete={() => clearFilter(key)}
+                    sx={{ borderRadius: 2 }}
+                  />
+                )
+              ))}
+              {(filters.service_tag || filters.license_type) && (
+                <Button 
+                  size="small" 
+                  onClick={() => {
+                    setFilters({ service_tag: '', license_type: '' });
+                    fetchEquipments({});
+                  }}
+                  sx={{ textTransform: 'none' }}
+                >
+                  Clear all
+                </Button>
+              )}
+            </Box>
+            
+            {/* Dropdown for suggestions */}
+            {showDropdown && searchValue && availableOptions[searchType]?.length > 0 && (
+              <Paper 
+                sx={{
+                  position: 'absolute',
+                  zIndex: 1,
+                  mt: 1,
+                  width: '100%',
+                  maxHeight: 200,
+                  overflow: 'auto',
+                  boxShadow: 3,
+                  borderRadius: 2
+                }}
+              >
+                {availableOptions[searchType]
+                  .filter(option => 
+                    option.toLowerCase().includes(searchValue.toLowerCase())
+                  )
+                  .map((option, index) => (
+                    <MenuItem 
+                      key={index} 
+                      onClick={() => handleSelectOption(option)}
+                      sx={{ px: 2, py: 1 }}
+                    >
+                      {option}
+                    </MenuItem>
+                  ))
+                }
+              </Paper>
+            )}
+          </Box>
+        </Box>
+        
         <Box sx={{ bgcolor: '#ffffff', borderRadius: 2, p: 2 }}>
           <TableContainer component={Paper} sx={{ bgcolor: '#ffffff' }}>
             <Table>
@@ -981,165 +1210,12 @@ const Datacenter = () => {
         </Alert>
       )}
 
-      {showExpiringSoon && (
-        <Alert
-          severity="warning"
-          onClose={() => setShowExpiringSoon(false)}
-          sx={{ mb: 3 }}
-        >
-          Some licenses are expiring soon. Please check the equipment list.
-        </Alert>
-      )}
-
-      <Box sx={{ mb: 3, display: 'flex', gap: 2, alignItems: 'center', flexWrap: 'wrap' }}>
-        <Box sx={{ display: 'flex', gap: 2, flexGrow: 1, flexWrap: 'wrap' }}>
-          <TextField
-            select
-            label="Filter By"
-            value={searchType}
-            onChange={handleSearchTypeChange}
-            sx={{ minWidth: 150 }}
-          >
-            <MenuItem value="service_tag">Service Tag</MenuItem>
-            <MenuItem value="license_type">License Type</MenuItem>
-          </TextField>
-
-          <Box sx={{ position: 'relative', flexGrow: 1, maxWidth: 400 }}>
-            <TextField
-              fullWidth
-              label={`Filter by ${searchType === 'service_tag' ? 'Service Tag' : 'License Type'}`}
-              value={searchValue}
-              onChange={handleSearchChange}
-              onKeyPress={handleKeyPress}
-              onFocus={() => searchValue.trim() && setShowDropdown(true)}
-              onBlur={() => setTimeout(() => setShowDropdown(false), 200)}
-              placeholder={`Type to filter by ${searchType === 'service_tag' ? 'service tag' : 'license type'}`}
-              InputProps={{
-                endAdornment: searchValue && (
-                  <InputAdornment position="end">
-                    <IconButton 
-                      onClick={() => {
-                        setSearchValue('');
-                        setFilters({ service_tag: '', license_type: '' });
-                        fetchEquipments({});
-                      }}
-                      edge="end"
-                      size="small"
-                    >
-                      <ClearIcon />
-                    </IconButton>
-                  </InputAdornment>
-                ),
-              }}
-            />
-            {showDropdown && searchValue && (
-              <Paper 
-                sx={{
-                  position: 'absolute',
-                  width: '100%',
-                  maxHeight: 200,
-                  overflow: 'auto',
-                  mt: 0.5,
-                  zIndex: 1,
-                  boxShadow: 3
-                }}
-              >
-                {Array.from(availableOptions[searchType] || [])
-                  .filter(option => 
-                    option && option.toLowerCase().includes(searchValue.toLowerCase())
-                  )
-                  .map((option, index) => (
-                    <MenuItem 
-                      key={index}
-                      onClick={() => handleSelectOption(option)}
-                      sx={{ px: 2, py: 1 }}
-                    >
-                      {option}
-                    </MenuItem>
-                  ))}
-              </Paper>
-            )}
-          </Box>
-
-          {/* Active filters display */}
-          {Object.entries(filters).map(([key, value]) => {
-            if (!value) return null;
-            return (
-              <Chip
-                key={key}
-                label={`${key.replace('_', ' ')}: ${value}`}
-                onDelete={() => clearFilter(key)}
-                color="primary"
-                variant="outlined"
-                sx={{ ml: 1 }}
-              />
-            );
-          })}
-        </Box>
-
-        <Button
-          variant="contained"
-          color="primary"
-          onClick={handleExportPDF}
-          startIcon={<DownloadIcon />}
-        >
-          Export PDF
-        </Button>
-
-        <Button
-          variant="contained"
-          color="secondary"
-          onClick={() => setEmailDialogOpen(true)}
-          startIcon={<EmailIcon />}
-        >
-          Send PDF
-        </Button>
+      {/* Main Content */}
+      <Box sx={{ flexGrow: 1, mt: 3 }}>
+        {renderContent()}
       </Box>
 
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
-        <Typography variant="h4" sx={{ color: '#007bff' }}>
-          {datacenter?.name || 'Datacenter'}
-        </Typography>
-        <Box sx={{ display: 'flex', gap: 2 }}>
-          <Button
-            variant="contained"
-            startIcon={<AddIcon />}
-            onClick={handleAddEquipment}
-            sx={{
-              bgcolor: '#007bff',
-              color: 'white',
-              textTransform: 'none',
-              borderRadius: 2
-            }}
-          >
-            Add Equipment
-          </Button>
-          <Button
-            variant="contained"
-            color="primary"
-            startIcon={<UploadIcon />}
-            onClick={() => fileInputRef.current.click()}
-            disabled={importLoading}
-            sx={{ textTransform: 'none', borderRadius: 2 }}
-          >
-            Import Excel
-          </Button>
-          <Button
-            variant="outlined"
-            startIcon={<DownloadIcon />}
-            onClick={handleExportExcel}
-            sx={{
-              textTransform: 'none',
-              borderRadius: 2
-            }}
-          >
-            Export Excel
-          </Button>
-        </Box>
-      </Box>
-
-      {renderContent()}
-
+      {/* Loading Indicator */}
       {(importLoading || deleteLoading) && (
         <Box sx={{ position: 'fixed', top: 20, right: 20, zIndex: 1000 }}>
           <Chip

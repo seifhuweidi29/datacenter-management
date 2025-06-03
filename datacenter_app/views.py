@@ -155,6 +155,9 @@ class EquipmentModifyView(APIView):
         
 
 class EquipmentDeleteView(APIView):
+    permission_classes = [IsAuthenticated]
+    authentication_classes = [JWTAuthentication]
+    
     def delete(self, request, datacenter_id, equipment_id):
         try:
             # Check if the DataCenter exists
@@ -162,18 +165,44 @@ class EquipmentDeleteView(APIView):
 
             # Retrieve the Equipment instance by its ID and check if it belongs to the specified DataCenter
             equipment = Equipment.objects.get(pk=equipment_id, datacenter=datacenter)
-
+            
+            # Store equipment info for response
+            equipment_info = {
+                'id': equipment.id,
+                'equipment_type': equipment.equipment_type,
+                'service_tag': equipment.service_tag
+            }
+            
             # Delete the equipment
             equipment.delete()
 
-            # Return success response
-            return Response({"message": "Equipment deleted successfully."}, status=status.HTTP_204_NO_CONTENT)
+            # Log the deletion
+            print(f"Equipment {equipment_info['service_tag']} deleted by {request.user.username}")
+            
+            # Return success response with 200 OK and message
+            return Response({
+                "success": True,
+                "message": "Equipment deleted successfully.",
+                "deleted_equipment": equipment_info
+            }, status=status.HTTP_200_OK)
 
         except DataCenter.DoesNotExist:
-            return Response({"error": "DataCenter not found"}, status=status.HTTP_404_NOT_FOUND)
+            return Response({
+                "success": False,
+                "error": "DataCenter not found"
+            }, status=status.HTTP_404_NOT_FOUND)
+            
         except Equipment.DoesNotExist:
-            return Response({"error": "Equipment not found in this DataCenter"}, status=status.HTTP_404_NOT_FOUND)
-        
+            return Response({
+                "success": False,
+                "error": "Equipment not found in this DataCenter"
+            }, status=status.HTTP_404_NOT_FOUND)
+            
+        except Exception as e:
+            return Response({
+                "success": False,
+                "error": f"An error occurred: {str(e)}"
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 class EquipmentLicenseTypeAutocompleteView(APIView):
     def get(self, request, datacenter_id):
