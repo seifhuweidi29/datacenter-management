@@ -577,12 +577,15 @@ class EquipmentImportExcelView(APIView):
                         error_messages.append(f"Row {row_num}: {str(e)}")
                         continue
 
-                # Bulk create all equipments
-                if new_equipments:
-                    created_equipments = Equipment.objects.bulk_create(new_equipments)
-                    created_count = len(created_equipments)
-                else:
-                    created_count = 0
+                # Create each equipment individually to handle duplicates
+                created_count = 0
+                for equipment in new_equipments:
+                    try:
+                        equipment.save()
+                        created_count += 1
+                    except Exception as e:
+                        error_messages.append(f"Error saving equipment {equipment.service_tag}: {str(e)}")
+                        continue
 
                 # Prepare response
                 response_data = {

@@ -146,6 +146,7 @@ REST_FRAMEWORK = {
 # CORS settings for local development
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:3000",
+    "http://127.0.0.1:3000",
 ]
 # Uncomment the following line for quick testing (not for production):
 # CORS_ALLOW_ALL_ORIGINS = True
