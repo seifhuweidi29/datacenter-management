@@ -1,4 +1,3 @@
-
 import React from 'react';
 import {
   Box,
@@ -52,18 +51,18 @@ const Datacenter = () => {
   // Constants
   const MAX_RETRIES = 3;
   const REQUEST_TIMEOUT = 10000; // 10 seconds
-  
+
   // Router and navigation
   const { id } = useParams();
   const navigate = useNavigate();
-  
+
   // Data state
   const [datacenter, setDatacenter] = useState(null);
   const [equipments, setEquipments] = useState([]);
   const [licenseTypes, setLicenseTypes] = useState([]);
   const [serviceTags, setServiceTags] = useState([]);
   const [filteredEquipments, setFilteredEquipments] = useState([]);
-  
+
   // Form state
   const [equipmentForm, setEquipmentForm] = useState({
     equipment_type: '',
@@ -72,7 +71,7 @@ const Datacenter = () => {
     serial_number: '',
     license_expired_date: ''
   });
-  
+
   // UI state
   const [isLoading, setIsLoading] = useState(true);
   const [openDialog, setOpenDialog] = useState(false);
@@ -83,7 +82,7 @@ const Datacenter = () => {
     open: false,
     equipment: null
   });
-  
+
   // Error and loading states
   const [error, setError] = useState('');
   const [showError, setShowError] = useState(false);
@@ -92,7 +91,7 @@ const Datacenter = () => {
   const [importMessage, setImportMessage] = useState('');
   const [deleteLoading, setDeleteLoading] = useState(false);
   const [deleteMessage, setDeleteMessage] = useState('');
-  
+
   // Search and filter state
   const [searchQuery, setSearchQuery] = useState('');
   const [searchType, setSearchType] = useState('equipment_type');
@@ -107,21 +106,21 @@ const Datacenter = () => {
     license_type: new Set()
   });
   const [showDropdown, setShowDropdown] = useState(false);
-  
+
   // Email dialog state
   const [emailDialogOpen, setEmailDialogOpen] = useState(false);
   const [emailToSend, setEmailToSend] = useState('');
   const [emailSending, setEmailSending] = useState(false);
   const [emailSendMessage, setEmailSendMessage] = useState('');
-  
+
   // Snackbar state
   const [openSnackbar, setOpenSnackbar] = useState(false);
   const [snackbarMessage, setSnackbarMessage] = useState('');
   const [snackbarSeverity, setSnackbarSeverity] = useState('info');
-  
+
   // Retry state
   const [retryCount, setRetryCount] = useState(0);
-  
+
   // Common datacenter equipment types
   const equipmentTypes = [
     'Server',
@@ -203,7 +202,7 @@ const Datacenter = () => {
         license_type: ''
       });
       setFilteredEquipments([]);
-      
+
       try {
         const dc = await datacenters.get(id);
         setDatacenter(dc);
@@ -297,12 +296,12 @@ const Datacenter = () => {
     if (equipments && equipments.length > 0) {
       const serviceTags = new Set();
       const licenseTypes = new Set();
-      
+
       equipments.forEach(eq => {
         if (eq.service_tag) serviceTags.add(eq.service_tag);
         if (eq.license_type) licenseTypes.add(eq.license_type);
       });
-      
+
       setAvailableOptions({
         service_tag: serviceTags,
         license_type: licenseTypes
@@ -314,11 +313,11 @@ const Datacenter = () => {
   const handleSearchChange = (e) => {
     const value = e.target.value;
     setSearchValue(value);
-    
+
     // Show dropdown when typing
     if (value.trim()) {
       setShowDropdown(true);
-      
+
       // Apply smart filtering as user types
       const searchTerm = value.toLowerCase();
       const filtered = equipments.filter(equipment => {
@@ -330,7 +329,7 @@ const Datacenter = () => {
           equipment.serial_number?.toLowerCase().includes(searchTerm)
         );
       });
-      
+
       setFilteredEquipments(filtered);
     } else {
       setShowDropdown(false);
@@ -342,7 +341,7 @@ const Datacenter = () => {
   // Handle search button click - show all matching results
   const handleSearch = () => {
     setShowDropdown(false);
-    
+
     if (!searchValue.trim()) {
       // If search is empty, clear all filters and show all
       const emptyFilters = {
@@ -353,7 +352,7 @@ const Datacenter = () => {
       setFilteredEquipments(equipments);
       return;
     }
-    
+
     // Apply smart filtering
     const searchTerm = searchValue.trim().toLowerCase();
     const filtered = equipments.filter(equipment => {
@@ -364,10 +363,10 @@ const Datacenter = () => {
         equipment.serial_number?.toLowerCase().includes(searchTerm)
       );
     });
-    
+
     setFilteredEquipments(filtered);
   };
-  
+
   // Handle pressing Enter in the search input
   const handleKeyPress = (e) => {
     if (e.key === 'Enter') {
@@ -379,7 +378,7 @@ const Datacenter = () => {
   const handleSelectOption = (option) => {
     setSearchValue(option);
     setShowDropdown(false);
-    
+
     // Apply smart filtering based on selected option
     const searchTerm = option.toLowerCase();
     const filtered = equipments.filter(equipment => {
@@ -390,7 +389,7 @@ const Datacenter = () => {
         equipment.serial_number?.toLowerCase().includes(searchTerm)
       );
     });
-    
+
     setFilteredEquipments(filtered);
   };
 
@@ -400,29 +399,29 @@ const Datacenter = () => {
     setSearchType(newSearchType);
     setSearchValue('');
     setShowDropdown(false);
-    
+
     // Clear the previous filter for the old type
     const newFilters = { ...filters };
     newFilters[searchType] = '';
     setFilters(newFilters);
-    
+
     // If we have a filter for the other type, keep it
     const activeFilters = Object.fromEntries(
       Object.entries(newFilters).filter(([_, v]) => v.trim() !== '')
     );
-    
+
     fetchEquipments(activeFilters);
   };
-  
+
   // Clear a specific filter
   const clearFilter = (filterType) => {
     const newFilters = { ...filters, [filterType]: '' };
     setFilters(newFilters);
-    
+
     const activeFilters = Object.fromEntries(
       Object.entries(newFilters).filter(([_, value]) => value.trim() !== '')
     );
-    
+
     if (Object.keys(activeFilters).length === 0) {
       fetchEquipments({});
     } else {
@@ -437,7 +436,7 @@ const Datacenter = () => {
     const activeFilters = Object.fromEntries(
       Object.entries(newFilters).filter(([_, value]) => value.trim() !== '')
     );
-    
+
     if (Object.keys(activeFilters).length === 0) {
       fetchEquipments({});
     } else {
@@ -482,7 +481,6 @@ const Datacenter = () => {
   };
 
   // Handle delete equipment
-  // Handle delete equipment
   const handleDeleteClick = (equipmentId, equipmentName) => {
     setDeleteConfirm({
       open: true,
@@ -493,14 +491,14 @@ const Datacenter = () => {
 
   // Confirm delete equipment
   const confirmDelete = async () => {
-    if (!deleteConfirm.equipmentId) return;
-    
+    if (!deleteConfirm.equipment) return;
+
     try {
       setDeleteLoading(true);
       setDeleteMessage('Deleting equipment...');
 
       const response = await axios.delete(
-        `${API_URL}/datacenters/${id}/equipments/${deleteConfirm.equipmentId}/`, 
+        `${API_URL}/datacenters/${id}/equipments/${deleteConfirm.equipment.id}/delete/`,
         {
           headers: {
             'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
@@ -511,7 +509,7 @@ const Datacenter = () => {
       );
 
       if (response.data.success) {
-        setSnackbarMessage(response.data.message || 'Equipment deleted successfully');
+        setSnackbarMessage(`✅ Equipment deleted successfully: ${deleteConfirm.equipment.equipment_type} (${deleteConfirm.equipment.service_tag})`);
         setSnackbarSeverity('success');
         fetchEquipments(); // Refresh the equipment list
       } else {
@@ -519,14 +517,14 @@ const Datacenter = () => {
       }
     } catch (error) {
       console.error('Delete error:', error);
-      setSnackbarMessage(error.response?.data?.error || 'Failed to delete equipment. Please try again.');
+      const errorMessage = error.response?.data?.error || 'Failed to delete equipment. Please try again.';
+      setSnackbarMessage(`❌ ${errorMessage}`);
       setSnackbarSeverity('error');
     } finally {
       setDeleteLoading(false);
       setDeleteConfirm({
         open: false,
-        equipmentId: null,
-        equipmentName: ''
+        equipment: null
       });
       setOpenSnackbar(true);
       setTimeout(() => setDeleteMessage(''), 5000);
@@ -537,11 +535,10 @@ const Datacenter = () => {
   const cancelDelete = () => {
     setDeleteConfirm({
       open: false,
-      equipmentId: null,
-      equipmentName: ''
+      equipment: null
     });
   };
-  
+
   const handleCloseSnackbar = () => {
     setOpenSnackbar(false);
   };
@@ -589,7 +586,9 @@ const Datacenter = () => {
   const handleExcelImport = async (e) => {
     const file = e.target.files[0];
     if (!file) {
-      console.log('No file selected');
+      setSnackbarMessage('No file selected');
+      setSnackbarSeverity('error');
+      setOpenSnackbar(true);
       return;
     }
 
@@ -619,12 +618,9 @@ const Datacenter = () => {
       // Create form data
       const formData = new FormData();
       formData.append('file', file);
-      console.log('File added to form data:', file.name, 'Size:', file.size, 'bytes');
 
-      // Make the import request
-      console.log('Sending import request to:', `${API_URL}/datacenters/${id}/equipments/import-excel/`);
       setImportMessage('Uploading and processing file...');
-      
+
       const response = await axios.post(
         `${API_URL}/datacenters/${id}/equipments/import-excel/`,
         formData,
@@ -638,33 +634,35 @@ const Datacenter = () => {
         }
       );
 
-      console.log('Import response:', response.data);
-      const { 
-        message: responseMessage, 
-        imported_count = 0, 
-        error_count = 0, 
-        errors = [], 
-        warnings = [] 
+      const {
+        message: responseMessage,
+        imported_count = 0,
+        updated_count = 0,
+        error_count = 0,
+        errors = [],
+        warnings = []
       } = response.data;
-      
+
       // Refresh the equipment list
       setImportMessage('Finalizing import and refreshing data...');
       await fetchEquipments();
-      
-      // Prepare success message
+
+      // Prepare detailed success message
       const successMsg = [
-        `Successfully imported ${imported_count} equipment items.`,
-        error_count > 0 ? `${error_count} items had errors.` : ''
-      ].filter(Boolean).join(' ');
-      
-      setImportMessage(successMsg);
-      
+        `✅ Successfully processed ${imported_count + updated_count} equipment items:`,
+        imported_count > 0 ? `• ${imported_count} new items added` : '',
+        updated_count > 0 ? `• ${updated_count} existing items updated` : '',
+        error_count > 0 ? `• ${error_count} items had errors` : ''
+      ].filter(Boolean).join('\n');
+
+      setSnackbarMessage(successMsg);
+      setSnackbarSeverity('success');
+      setOpenSnackbar(true);
+
       // Show errors if any
       if (error_count > 0 || (errors && errors.length > 0)) {
-        console.error('Import completed with errors:', errors);
         const errorMessages = [];
-        
-        // Handle different error formats
+
         if (Array.isArray(errors)) {
           errorMessages.push(...errors);
         } else if (typeof errors === 'object') {
@@ -675,72 +673,23 @@ const Datacenter = () => {
               errorMessages.push(`${key}: ${value}`);
             }
           });
-        } else if (errors) {
-          errorMessages.push(String(errors));
         }
-        
+
         setImportErrors(errorMessages);
+        setError('Some items could not be imported. See details below.');
         setShowError(true);
-      } else {
-        setTimeout(() => setImportMessage(''), 5000);
       }
-      
-      // Log warnings if any
-      if (warnings.length > 0) {
-        console.warn('Import completed with warnings:', warnings);
-      }
-      
     } catch (error) {
-      console.error('Error during import:', error);
-      
-      let errorMessage = 'Failed to import Excel file. ';
-      
-      if (error.response) {
-        // Server responded with an error status code
-        console.error('Server response:', error.response.data);
-        
-        if (error.response.status === 401) {
-          errorMessage = 'Session expired. Please log in again.';
-          // Clear any existing tokens
-          localStorage.removeItem('access_token');
-          localStorage.removeItem('refresh_token');
-          // Redirect to login
-          if (navigate) {
-            navigate('/login');
-          }
-        } else if (error.response.data && typeof error.response.data === 'object') {
-          // Handle structured error response
-          if (error.response.data.error) {
-            errorMessage = error.response.data.error;
-          } else if (error.response.data.detail) {
-            errorMessage = error.response.data.detail;
-          } else if (error.response.data.message) {
-            errorMessage = error.response.data.message;
-          } else {
-            errorMessage = JSON.stringify(error.response.data);
-          }
-        } else if (error.response.status === 413) {
-          errorMessage = 'File too large. Please try a smaller file (max 10MB).';
-        } else if (error.response.status >= 500) {
-          errorMessage = 'Server error. Please try again later.';
-        }
-      } else if (error.request) {
-        // Request was made but no response received
-        console.error('No response received:', error.request);
-        errorMessage = 'No response from server. Please check your connection and try again.';
-      } else if (error.message) {
-        // Something happened in setting up the request
-        console.error('Request setup error:', error.message);
-        errorMessage = error.message;
-      } else {
-        errorMessage = 'An unknown error occurred. Please try again.';
-      }
-      
+      console.error('Import error:', error);
+      const errorMessage = error.response?.data?.error || error.message || 'Failed to import Excel file';
+      setSnackbarMessage(`❌ Import failed: ${errorMessage}`);
+      setSnackbarSeverity('error');
+      setOpenSnackbar(true);
       setError(errorMessage);
       setShowError(true);
-      setImportMessage('');
     } finally {
       setImportLoading(false);
+      setImportMessage('');
     }
   };
 
@@ -796,30 +745,39 @@ const Datacenter = () => {
 
   const handleSendPDF = async () => {
     if (!emailToSend) {
-      setError("Please enter an email address");
-      setShowError(true);
+      setError('Please enter an email address');
+      setSnackbarMessage('❌ Please enter an email address');
+      setSnackbarSeverity('error');
+      setOpenSnackbar(true);
       return;
     }
 
     setEmailSending(true);
     try {
-      await axios.post(
+      const response = await axios.post(
         `${API_URL}/datacenters/${id}/equipments/send-pdf/`,
         { email: emailToSend },
         {
           headers: {
-            'Authorization': `Bearer ${localStorage.getItem('access_token')}`
+            'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
+            'Content-Type': 'application/json'
           }
         }
       );
-      setEmailSendMessage("PDF sent successfully!");
+
+      setSnackbarMessage(`✅ PDF report sent successfully to ${emailToSend}`);
+      setSnackbarSeverity('success');
       setEmailDialogOpen(false);
+      setEmailToSend('');
     } catch (error) {
-      console.error("Error sending PDF:", error);
-      setError("Failed to send PDF");
-      setShowError(true);
+      console.error('Error sending PDF:', error);
+      const errorMessage = error.response?.data?.error || 'Failed to send PDF report';
+      setSnackbarMessage(`❌ ${errorMessage}`);
+      setSnackbarSeverity('error');
+      setError(errorMessage);
     } finally {
       setEmailSending(false);
+      setOpenSnackbar(true);
     }
   };
 
@@ -882,8 +840,8 @@ const Datacenter = () => {
     return (
       <>
         <Box sx={{ width: '100%', mb: 4 }}>
-          <Box sx={{ 
-            display: 'grid', 
+          <Box sx={{
+            display: 'grid',
             gridTemplateColumns: { xs: '1fr', sm: 'repeat(2, 1fr)', md: 'repeat(3, 1fr)', lg: 'repeat(5, 1fr)' },
             gap: 3,
             '& .action-button': {
@@ -955,11 +913,11 @@ const Datacenter = () => {
               Send PDF
             </Button>
           </Box>
-          
-          <Box sx={{ 
-            display: 'flex', 
-            flexDirection: 'column', 
-            gap: 1, 
+
+          <Box sx={{
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 1,
             width: '100%',
             maxWidth: '100%',
             mt: 2
@@ -1016,7 +974,7 @@ const Datacenter = () => {
                 Search
               </Button>
             </Box>
-            
+
             {/* Active filters */}
             <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', mt: 1 }}>
               {Object.entries(filters).map(([key, value]) => (
@@ -1030,8 +988,8 @@ const Datacenter = () => {
                 )
               ))}
               {(filters.service_tag || filters.license_type) && (
-                <Button 
-                  size="small" 
+                <Button
+                  size="small"
                   onClick={() => {
                     setFilters({ service_tag: '', license_type: '' });
                     fetchEquipments({});
@@ -1042,10 +1000,10 @@ const Datacenter = () => {
                 </Button>
               )}
             </Box>
-            
+
             {/* Dropdown for suggestions */}
             {showDropdown && searchValue && availableOptions[searchType]?.length > 0 && (
-              <Paper 
+              <Paper
                 sx={{
                   position: 'absolute',
                   zIndex: 1,
@@ -1058,12 +1016,12 @@ const Datacenter = () => {
                 }}
               >
                 {availableOptions[searchType]
-                  .filter(option => 
+                  .filter(option =>
                     option.toLowerCase().includes(searchValue.toLowerCase())
                   )
                   .map((option, index) => (
-                    <MenuItem 
-                      key={index} 
+                    <MenuItem
+                      key={index}
                       onClick={() => handleSelectOption(option)}
                       sx={{ px: 2, py: 1 }}
                     >
@@ -1075,7 +1033,7 @@ const Datacenter = () => {
             )}
           </Box>
         </Box>
-        
+
         <Box sx={{ bgcolor: '#ffffff', borderRadius: 2, p: 2 }}>
           <TableContainer component={Paper} sx={{ bgcolor: '#ffffff' }}>
             <Table>
@@ -1187,10 +1145,10 @@ const Datacenter = () => {
   return (
     <Box component="div" sx={{ p: 3 }}>
       {showError && (
-        <Alert 
-          severity="error" 
-          sx={{ 
-            mt: 2, 
+        <Alert
+          severity="error"
+          sx={{
+            mt: 2,
             mb: 2,
             '& .MuiAlert-message': {
               width: '100%'
@@ -1201,20 +1159,20 @@ const Datacenter = () => {
             <Typography variant="body1" gutterBottom>
               {error}
             </Typography>
-            
+
             {importErrors && importErrors.length > 0 && (
               <Box sx={{ mt: 2, p: 2, bgcolor: 'rgba(0,0,0,0.05)', borderRadius: 1 }}>
                 <Typography variant="subtitle2" gutterBottom sx={{ fontWeight: 'bold' }}>
                   Error Details (showing first 5 of {importErrors.length}):
                 </Typography>
-                <Box 
-                  component="ul" 
-                  sx={{ 
-                    m: 0, 
+                <Box
+                  component="ul"
+                  sx={{
+                    m: 0,
                     pl: 2,
                     maxHeight: '200px',
                     overflowY: 'auto',
-                    '& li': { 
+                    '& li': {
                       mb: 1,
                       fontFamily: 'monospace',
                       fontSize: '0.85rem',
@@ -1229,13 +1187,13 @@ const Datacenter = () => {
                     </Box>
                   ))}
                 </Box>
-                
+
                 {importErrors.length > 5 && (
                   <Typography variant="caption" sx={{ display: 'block', mt: 1, fontStyle: 'italic' }}>
                     ... and {importErrors.length - 5} more errors not shown
                   </Typography>
                 )}
-                
+
                 <Typography variant="body2" sx={{ mt: 2, color: 'text.secondary' }}>
                   Tip: Check that all required columns are present and contain valid data.
                 </Typography>
@@ -1429,19 +1387,25 @@ const Datacenter = () => {
           </Button>
         </DialogActions>
       </Dialog>
-      
+
       {/* Snackbar for notifications */}
-      <Snackbar 
-        open={openSnackbar} 
-        autoHideDuration={6000} 
+      <Snackbar
+        open={openSnackbar}
+        autoHideDuration={8000}
         onClose={handleCloseSnackbar}
         anchorOrigin={{ vertical: 'top', horizontal: 'right' }}
       >
-        <Alert 
-          onClose={handleCloseSnackbar} 
+        <Alert
+          onClose={handleCloseSnackbar}
           severity={snackbarSeverity}
           variant="filled"
-          sx={{ width: '100%' }}
+          sx={{
+            width: '100%',
+            whiteSpace: 'pre-line',
+            '& .MuiAlert-message': {
+              width: '100%'
+            }
+          }}
         >
           {snackbarMessage}
         </Alert>

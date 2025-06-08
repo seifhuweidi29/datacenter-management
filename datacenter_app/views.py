@@ -17,6 +17,7 @@ from django.core.mail import EmailMessage
 from django.conf import settings
 import binascii
 from openpyxl import load_workbook
+from django.utils import timezone
 
 # Custom Token View with better error handling
 class CustomTokenObtainPairView(TokenObtainPairView):
@@ -632,35 +633,70 @@ class EquipmentImportExcelView(APIView):
 
 class EquipmentSendPDFByEmailView(APIView):
     def post(self, request, datacenter_id):
-        import binascii
-        # Use email from frontend if provided, else fallback
-        recipient = request.data.get('email', 'test@example.com')
         try:
-            datacenter = DataCenter.objects.get(pk=datacenter_id)
+            # Validate email
+            email = request.data.get('email')
+            if not email:
+                return Response({'error': 'Email address is required'}, status=400)
+
+            # Get datacenter and equipment
+            try:
+                datacenter = DataCenter.objects.get(pk=datacenter_id)
+            except DataCenter.DoesNotExist:
+                return Response({'error': 'Datacenter not found'}, status=404)
+
             equipments = Equipment.objects.filter(datacenter=datacenter)
             if not equipments.exists():
-                return Response({'error': 'No equipment found for this datacenter.'}, status=404)
-            pdf_buffer = generate_equipment_pdf(equipments)
-            pdf_bytes = pdf_buffer.getvalue()
-            print(f'[DEBUG] Generated PDF size: {len(pdf_bytes)} bytes')
-            print(f'[DEBUG] PDF header: {binascii.hexlify(pdf_bytes[:16])}')
-            if not pdf_bytes or len(pdf_bytes) < 100:
-                print('[DEBUG] PDF is empty or too small!')
-                raise Exception('Generated PDF is empty or too small!')
-            msg = EmailMessage(
-                subject=f"Equipment Information for {datacenter.name}",
-                body=f"Please find attached the equipment information for datacenter: {datacenter.name}.",
-                from_email=settings.DEFAULT_FROM_EMAIL,
-                to=[recipient],
-            )
-            msg.attach(f"equipments_{datacenter.name}.pdf", pdf_bytes, 'application/pdf')
-            msg.send(fail_silently=False)
-            print(f'[DEBUG] Sent real PDF to {recipient}')
-            return Response({'message': f'PDF sent successfully to {recipient}!'}, status=200)
-        except DataCenter.DoesNotExist:
-            return Response({'error': 'Datacenter not found.'}, status=404)
+                return Response({'error': 'No equipment found for this datacenter'}, status=404)
+
+            # Generate PDF
+            try:
+                pdf_buffer = generate_equipment_pdf(equipments)
+                pdf_bytes = pdf_buffer.getvalue()
+                if not pdf_bytes or len(pdf_bytes) < 100:
+                    return Response({'error': 'Failed to generate PDF report'}, status=500)
+            except Exception as e:
+                return Response({'error': f'Error generating PDF: {str(e)}'}, status=500)
+
+            # Send email
+            try:
+                msg = EmailMessage(
+                    subject=f"Equipment Information for {datacenter.name}",
+                    body=f"""
+Dear User,
+
+Please find attached the equipment information for datacenter: {datacenter.name}.
+
+Summary:
+- Total Equipment: {equipments.count()}
+- Generated on: {timezone.now().strftime('%Y-%m-%d %H:%M:%S')}
+
+Best regards,
+Cloud Device Management System
+""",
+                    from_email=settings.DEFAULT_FROM_EMAIL,
+                    to=[email],
+                )
+                msg.attach(f"equipments_{datacenter.name}.pdf", pdf_bytes, 'application/pdf')
+                msg.send(fail_silently=False)
+
+                return Response({
+                    'message': f'PDF report sent successfully to {email}',
+                    'details': {
+                        'datacenter': datacenter.name,
+                        'equipment_count': equipments.count(),
+                        'sent_to': email
+                    }
+                }, status=200)
+
+            except Exception as e:
+                return Response({
+                    'error': 'Failed to send email',
+                    'details': str(e)
+                }, status=500)
+
         except Exception as e:
-            import traceback
-            print('[DEBUG] Exception in PDF email sending:')
-            traceback.print_exc()
-            return Response({'error': str(e)}, status=500)
+            return Response({
+                'error': 'An unexpected error occurred',
+                'details': str(e)
+            }, status=500)
