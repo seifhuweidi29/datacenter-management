@@ -81,14 +81,29 @@ export const auth = {
     return response.data;
   },
   logout: async () => {
-    const refreshToken = localStorage.getItem('refresh_token');
-    if (refreshToken) {
-      await api.post('/logout/', { refresh_token: refreshToken });
-    }
-    localStorage.removeItem('access_token');
-    localStorage.removeItem('refresh_token');
-    if (navigateCallback) {
-      navigateCallback('/login');
+    try {
+      const refreshToken = localStorage.getItem('refresh_token');
+      if (refreshToken) {
+        await api.post('/logout/', { refresh_token: refreshToken }, {
+          headers: {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json'
+          }
+        });
+      }
+      localStorage.removeItem('access_token');
+      localStorage.removeItem('refresh_token');
+      if (navigateCallback) {
+        navigateCallback('/login');
+      }
+    } catch (error) {
+      // Clear tokens even if logout fails
+      localStorage.removeItem('access_token');
+      localStorage.removeItem('refresh_token');
+      if (navigateCallback) {
+        navigateCallback('/login');
+      }
+      console.error('Logout failed:', error);
     }
   },
 };

@@ -79,6 +79,10 @@ const Datacenter = () => {
   const [isEditMode, setIsEditMode] = useState(false);
   const [currentEquipment, setCurrentEquipment] = useState(null);
   const [showExpiringSoon, setShowExpiringSoon] = useState(false);
+  const [deleteConfirm, setDeleteConfirm] = useState({
+    open: false,
+    equipment: null
+  });
   
   // Error and loading states
   const [error, setError] = useState('');
@@ -426,19 +430,22 @@ const Datacenter = () => {
     }
   };
 
-  const handleAddEquipment = () => {
-    setIsEditMode(false);
-    setCurrentEquipment(null);
-    setEquipmentForm({
-      equipment_type: '',
-      service_tag: '',
-      license_type: '',
-      serial_number: '',
-      license_expired_date: '',
-    });
-    setOpenDialog(true);
+  const handleFilterChange = (key) => (event) => {
+    const newFilters = { ...filters, [key]: event.target.value };
+    setFilters(newFilters);
+
+    const activeFilters = Object.fromEntries(
+      Object.entries(newFilters).filter(([_, value]) => value.trim() !== '')
+    );
+    
+    if (Object.keys(activeFilters).length === 0) {
+      fetchEquipments({});
+    } else {
+      fetchEquipments(activeFilters);
+    }
   };
 
+  // Handle edit equipment
   const handleEdit = (equipment) => {
     setIsEditMode(true);
     setCurrentEquipment(equipment);
@@ -452,12 +459,30 @@ const Datacenter = () => {
     setOpenDialog(true);
   };
 
-  const [deleteConfirm, setDeleteConfirm] = useState({
-    open: false,
-    equipmentId: null,
-    equipmentName: ''
-  });
+  // Handle add equipment
+  const handleAddEquipment = () => {
+    setIsEditMode(false);
+    setCurrentEquipment(null);
+    setEquipmentForm({
+      equipment_type: '',
+      service_tag: '',
+      license_type: '',
+      serial_number: '',
+      license_expired_date: ''
+    });
+    setOpenDialog(true);
+  };
 
+  // Handle delete equipment
+  const handleDeleteEquipment = (equipment) => {
+    setDeleteConfirm({
+      open: true,
+      equipment: equipment
+    });
+  };
+
+  // Handle delete equipment
+  // Handle delete equipment
   const handleDeleteClick = (equipmentId, equipmentName) => {
     setDeleteConfirm({
       open: true,
@@ -466,6 +491,7 @@ const Datacenter = () => {
     });
   };
 
+  // Confirm delete equipment
   const confirmDelete = async () => {
     if (!deleteConfirm.equipmentId) return;
     
@@ -497,14 +523,23 @@ const Datacenter = () => {
       setSnackbarSeverity('error');
     } finally {
       setDeleteLoading(false);
-      setDeleteConfirm({ ...deleteConfirm, open: false });
+      setDeleteConfirm({
+        open: false,
+        equipmentId: null,
+        equipmentName: ''
+      });
       setOpenSnackbar(true);
       setTimeout(() => setDeleteMessage(''), 5000);
     }
   };
 
+  // Cancel delete confirmation
   const cancelDelete = () => {
-    setDeleteConfirm({ ...deleteConfirm, open: false });
+    setDeleteConfirm({
+      open: false,
+      equipmentId: null,
+      equipmentName: ''
+    });
   };
   
   const handleCloseSnackbar = () => {
@@ -1130,7 +1165,7 @@ const Datacenter = () => {
                           </Button>
                           <IconButton
                             color="error"
-                            onClick={() => handleDeleteClick(equipment.id, `${equipment.equipment_type} - ${equipment.service_tag}`)}
+                            onClick={() => handleDeleteEquipment(equipment)}
                             disabled={deleteLoading}
                             title="Delete equipment"
                           >
@@ -1328,13 +1363,47 @@ const Datacenter = () => {
         </DialogActions>
       </Dialog>
 
+      {/* Delete Confirmation Dialog */}
+      <Dialog
+        open={deleteConfirm.open}
+        onClose={cancelDelete}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle>Delete Equipment</DialogTitle>
+        <DialogContent>
+          <Typography variant="h6" component="div" sx={{ mb: 2 }}>
+            Are you sure you want to delete this equipment?
+          </Typography>
+          <Typography variant="body1" sx={{ mb: 2 }}>
+            Type: {deleteConfirm.equipment?.equipment_type}
+          </Typography>
+          <Typography variant="body1">
+            Service Tag: {deleteConfirm.equipment?.service_tag}
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={cancelDelete} color="primary">
+            Cancel
+          </Button>
+          <Button
+            onClick={confirmDelete}
+            color="error"
+            variant="contained"
+            disabled={deleteLoading}
+          >
+            {deleteLoading ? 'Deleting...' : 'Delete'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
       <Dialog
         open={emailDialogOpen}
         onClose={() => setEmailDialogOpen(false)}
         maxWidth="sm"
         fullWidth
       >
-        <DialogTitle>Send PDF</DialogTitle>
+        <DialogTitle>Send PDF Report</DialogTitle>
         <DialogContent>
           <TextField
             fullWidth
@@ -1342,33 +1411,21 @@ const Datacenter = () => {
             value={emailToSend}
             onChange={(e) => setEmailToSend(e.target.value)}
             margin="normal"
-            error={!emailToSend && emailSending}
-            helperText={!emailToSend && emailSending ? 'Please enter an email address' : ''}
+            error={error && !emailToSend}
+            helperText={error && !emailToSend ? 'Please enter an email address' : ''}
           />
-          {emailSendMessage && (
-            <Typography
-              variant="body2"
-              color={emailSendMessage.includes('success') ? 'success' : 'error'}
-              sx={{ mt: 2 }}
-            >
-              {emailSendMessage}
-            </Typography>
-          )}
+          <Typography variant="caption" sx={{ mt: 2 }}>
+            The PDF report will be sent to the specified email address.
+          </Typography>
         </DialogContent>
         <DialogActions>
-          <Button
-            onClick={() => setEmailDialogOpen(false)}
-            sx={{ textTransform: 'none' }}
-          >
-            Cancel
-          </Button>
+          <Button onClick={() => setEmailDialogOpen(false)}>Cancel</Button>
           <Button
             variant="contained"
             onClick={handleSendPDF}
             disabled={emailSending}
-            sx={{ textTransform: 'none' }}
           >
-            Send
+            {emailSending ? 'Sending...' : 'Send'}
           </Button>
         </DialogActions>
       </Dialog>
