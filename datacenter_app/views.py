@@ -96,7 +96,7 @@ class EquipmentFetchView(APIView):
             datacenter = DataCenter.objects.get(pk=datacenter_id)
 
             # Start with all equipment for this datacenter
-            equipments = Equipment.objects.filter(datacenter=datacenter)
+            equipments = Equipment.objects.filter(datacenter=datacenter, is_deleted=False)
 
             # Apply search filters if provided
             if service_tag:
@@ -137,7 +137,7 @@ class EquipmentModifyView(APIView):
             datacenter = DataCenter.objects.get(pk=datacenter_id)
 
             # Retrieve the Equipment instance by its ID
-            equipment = Equipment.objects.get(pk=equipment_id, datacenter=datacenter)
+            equipment = Equipment.objects.get(pk=equipment_id, datacenter=datacenter, is_deleted=False)
 
             # Use the ModifyEquipmentSerializer to validate and update the data
             serializer = ModifyEquipmentSerializer(equipment, data=request.data, partial=True)
@@ -165,7 +165,7 @@ class EquipmentDeleteView(APIView):
             datacenter = DataCenter.objects.get(pk=datacenter_id)
 
             # Retrieve the Equipment instance by its ID and check if it belongs to the specified DataCenter
-            equipment = Equipment.objects.get(pk=equipment_id, datacenter=datacenter)
+            equipment = Equipment.objects.get(pk=equipment_id, datacenter=datacenter, is_deleted=False)
             
             # Store equipment info for response
             equipment_info = {
@@ -174,8 +174,10 @@ class EquipmentDeleteView(APIView):
                 'service_tag': equipment.service_tag
             }
             
-            # Delete the equipment
-            equipment.delete()
+            # Soft delete the equipment
+            equipment.is_deleted = True
+            equipment.deleted_at = timezone.now()
+            equipment.save()
 
             # Log the deletion
             print(f"Equipment {equipment_info['service_tag']} deleted by {request.user.username}")
@@ -205,6 +207,49 @@ class EquipmentDeleteView(APIView):
                 "error": f"An error occurred: {str(e)}"
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
+# New view to fetch soft-deleted equipment (history)
+class EquipmentHistoryView(APIView):
+    permission_classes = [IsAuthenticated]
+    authentication_classes = [JWTAuthentication]
+
+    def get(self, request, datacenter_id):
+        try:
+            datacenter = DataCenter.objects.get(pk=datacenter_id)
+
+            deleted_equipments = Equipment.objects.filter(datacenter=datacenter, is_deleted=True)
+
+            serializer = EquipmentSerializer(deleted_equipments, many=True)
+            return Response(serializer.data, status=status.HTTP_200_OK)
+
+        except DataCenter.DoesNotExist:
+            return Response({"error": "DataCenter not found"}, status=status.HTTP_404_NOT_FOUND)
+        except Exception as e:
+            return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+# Restore soft-deleted equipment
+class EquipmentRestoreView(APIView):
+    permission_classes = [IsAuthenticated]
+    authentication_classes = [JWTAuthentication]
+
+    def patch(self, request, datacenter_id, equipment_id):
+        try:
+            datacenter = DataCenter.objects.get(pk=datacenter_id)
+            equipment = Equipment.objects.get(pk=equipment_id, datacenter=datacenter, is_deleted=True)
+
+            equipment.is_deleted = False
+            equipment.deleted_at = None
+            equipment.save()
+
+            serializer = EquipmentSerializer(equipment)
+            return Response(serializer.data, status=status.HTTP_200_OK)
+
+        except DataCenter.DoesNotExist:
+            return Response({"error": "DataCenter not found"}, status=status.HTTP_404_NOT_FOUND)
+        except Equipment.DoesNotExist:
+            return Response({"error": "Equipment not found or not deleted"}, status=status.HTTP_404_NOT_FOUND)
+        except Exception as e:
+            return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
 class EquipmentLicenseTypeAutocompleteView(APIView):
     def get(self, request, datacenter_id):
         try:
@@ -212,7 +257,7 @@ class EquipmentLicenseTypeAutocompleteView(APIView):
             datacenter = DataCenter.objects.get(pk=datacenter_id)
 
             # Get all distinct license types for the equipments in the given DataCenter
-            license_types = Equipment.objects.filter(datacenter=datacenter).values_list('license_type', flat=True).distinct()
+            license_types = Equipment.objects.filter(datacenter=datacenter, is_deleted=False).values_list('license_type', flat=True).distinct()
 
             # Return the license types as a list
             return Response(list(license_types), status=status.HTTP_200_OK)
@@ -227,7 +272,7 @@ class EquipmentServiceTagAutocompleteView(APIView):
             datacenter = DataCenter.objects.get(pk=datacenter_id)
 
             # Get all distinct service tags for the equipments in the given DataCenter
-            service_tags = Equipment.objects.filter(datacenter=datacenter).values_list('service_tag', flat=True).distinct()
+            service_tags = Equipment.objects.filter(datacenter=datacenter, is_deleted=False).values_list('service_tag', flat=True).distinct()
 
             # Return the service tags as a list
             return Response(list(service_tags), status=status.HTTP_200_OK)
@@ -246,7 +291,7 @@ class EquipmentExportExcelView(APIView):
             datacenter = DataCenter.objects.get(pk=datacenter_id)
 
             # Get all equipments for the given DataCenter
-            equipments = Equipment.objects.filter(datacenter=datacenter)
+            equipments = Equipment.objects.filter(datacenter=datacenter, is_deleted=False)
 
             # Apply filters if provided
             if service_tag:
@@ -299,7 +344,7 @@ class EquipmentExportPDFView(APIView):
             datacenter = DataCenter.objects.get(pk=datacenter_id)
 
             # Get all equipments for the given DataCenter
-            equipments = Equipment.objects.filter(datacenter=datacenter)
+            equipments = Equipment.objects.filter(datacenter=datacenter, is_deleted=False)
 
             # Apply filters if provided
             if service_tag:
@@ -645,7 +690,7 @@ class EquipmentSendPDFByEmailView(APIView):
             except DataCenter.DoesNotExist:
                 return Response({'error': 'Datacenter not found'}, status=404)
 
-            equipments = Equipment.objects.filter(datacenter=datacenter)
+            equipments = Equipment.objects.filter(datacenter=datacenter, is_deleted=False)
             if not equipments.exists():
                 return Response({'error': 'No equipment found for this datacenter'}, status=404)
 

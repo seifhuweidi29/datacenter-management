@@ -22,6 +22,7 @@ import {
   Dashboard as DashboardIcon,
   Logout as LogoutIcon,
   AccountCircle as AccountCircleIcon,
+  History as HistoryIcon,
 } from '@mui/icons-material';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { auth } from '../api';
@@ -61,10 +62,11 @@ const NavBar = ({ children }) => {
 
   const menuItems = [
     { text: 'Datacenters', path: '/datacenters', icon: <DashboardIcon /> },
+    { text: 'History', path: '/history', icon: <HistoryIcon /> },
   ];
 
   const drawer = (
-    <Box sx={{ width: 250 }}>
+    <Box sx={{ width: 250, height: '100%', display: 'flex', flexDirection: 'column' }}>
       <Box sx={{ p: 2, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
         <Box sx={{ height: 40 }} />
       </Box>
@@ -89,14 +91,15 @@ const NavBar = ({ children }) => {
             <ListItemText primary={item.text} />
           </ListItem>
         ))}
-        <Divider />
-        <ListItem button="true" onClick={handleLogout}>
-          <ListItemIcon sx={{ color: 'error.main' }}>
-            <LogoutIcon />
-          </ListItemIcon>
-          <ListItemText primary="Logout" sx={{ color: 'error.main' }} />
-        </ListItem>
       </List>
+      <Box sx={{ flexGrow: 1 }} />
+      <Divider />
+      <ListItem button="true" onClick={handleLogout} sx={{ mb: 1 }}>
+        <ListItemIcon sx={{ color: 'error.main' }}>
+          <LogoutIcon />
+        </ListItemIcon>
+        <ListItemText primary="Logout" sx={{ color: 'error.main' }} />
+      </ListItem>
     </Box>
   );
 

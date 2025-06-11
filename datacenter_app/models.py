@@ -13,6 +13,9 @@ class Equipment(models.Model):
     license_type = models.CharField(max_length=100)
     serial_number = models.CharField(max_length=100, unique=True)
     license_expired_date = models.DateField()
+    # Soft delete fields
+    is_deleted = models.BooleanField(default=False)
+    deleted_at = models.DateTimeField(null=True, blank=True)
     
     # ForeignKey to DataCenter (many equipments can belong to one datacenter)
     datacenter = models.ForeignKey(DataCenter, related_name='equipments', on_delete=models.CASCADE)
